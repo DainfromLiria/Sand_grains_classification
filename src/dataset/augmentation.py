@@ -118,6 +118,7 @@ class Augmentation:
         """Create json file with main information about dataset."""
         info_data = {
             "img_count": self._id,
+            "classes_count": len(self._classes),
             "classes": self._classes,
             "categories": self._categories
         }
