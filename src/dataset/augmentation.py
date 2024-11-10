@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import cv2
 import numpy as np
@@ -18,7 +18,8 @@ class Augmentation:
 
     def __init__(self) -> None:
         self._coco: COCO = COCO(config.ANNOTATIONS_PATH)
-        self._categories = {c['name']: c['id'] for c in self._coco.loadCats(self._coco.getCatIds())}
+        self._classes = {c['name']: c['id'] for c in self._coco.loadCats(self._coco.getCatIds())}
+        self._categories: Dict[int, List[int]] = {}
         self._id: int = 0
 
     def augment(self) -> None:
@@ -110,16 +111,15 @@ class Augmentation:
                 mask_path = os.path.join(masks_path, f"{i}.png")
                 cv2.imwrite(mask_path, mask)
             # save categories
-            categories_path = os.path.join(img_folder_path, "categories.txt")
-            with open(categories_path, "w") as file:
-                file.write(str(category_ids))
+            self._categories[self._id] = category_ids
             self._id += 1
 
     def _create_dataset_info(self) -> None:
         """Create json file with main information about dataset."""
         info_data = {
             "img_count": self._id,
-            "classes": self._categories
+            "classes": self._classes,
+            "categories": self._categories
         }
         with open(config.AUG_DATASET_INFO_PATH, "w") as file:
             json.dump(info_data, file, indent=4)
