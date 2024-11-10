@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import List, Tuple, Dict
+from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
