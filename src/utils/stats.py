@@ -6,7 +6,7 @@ import seaborn as sns
 from pycocotools.coco import COCO
 
 # Load COCO annotations
-ann_file = "D:\\Study_AI\\BI-BAP\\Sand_grains_classification\\data\\annotations\\instances_default.json"
+ann_file = "/data/annotations/instances_default.json"
 coco = COCO(ann_file)
 
 # Extract category names and their respective counts
