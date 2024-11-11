@@ -1,5 +1,6 @@
 import json
-import os.path
+import os
+import torch
 from typing import Dict, List, Tuple
 
 import cv2
@@ -29,7 +30,6 @@ class SandGrainsDataset(Dataset):
             raise Exception(f"File with name {idx}.tif does not exist")
         image = cv2.imread(image_path)
 
-        print(f"Categories: {self.info['categories'][str(idx)]}")
         # read masks
         masks_dir = os.path.join(data_path, "masks")
         if not os.path.exists(masks_dir):
@@ -41,8 +41,12 @@ class SandGrainsDataset(Dataset):
                 raise Exception(f"Mask with index {file} does not exist")
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             masks.append(mask)
-        # TODO convert image into tensor
-        return image
+        # TODO transformations (resize)
+        # convert masks into tensor
+        tensor_masks = torch.zeros((config.IMAGE_HEIGHT, config.IMAGE_WIDTH, self.info["classes_count"]), dtype=torch.uint8)
+        for i, c_idx in enumerate(self.info["categories"][str(idx)]):
+            tensor_masks[:, :, c_idx] += torch.tensor(masks[i], dtype=torch.uint8)
+        return image, tensor_masks
 
     def _read_info(self):
         """Read file with main information about dataset."""
