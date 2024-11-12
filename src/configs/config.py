@@ -18,7 +18,6 @@ class DataConfig:
 
     TRAIN_SIZE: float = 0.7
     VAL_SIZE: float = 0.15
-    BATCH_SIZE: int = 32
 
     AUGMENTATIONS: list = field(default_factory=lambda: [
         A.HorizontalFlip(p=1.0),
@@ -35,6 +34,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
+    BATCH_SIZE: int = 32
 
 
 @dataclass
