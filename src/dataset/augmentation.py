@@ -2,6 +2,8 @@ import json
 import os
 import time
 from typing import Dict, List, Tuple
+import random
+import shutil
 
 import cv2
 import numpy as np
@@ -32,6 +34,7 @@ class Augmentation:
             self._save(transformed_data=transformed_data, category_ids=category_ids)
             break  # TODO remove it
         t_end = time.monotonic()
+        self.train_test_split()
         self._create_dataset_info()
         print(f"Time taken for generating new dataset: {round(t_end - t_begin, 2)}s")
 
@@ -124,3 +127,37 @@ class Augmentation:
         }
         with open(config.AUG_DATASET_INFO_PATH, "w") as file:
             json.dump(info_data, file, indent=4)
+
+    def train_test_split(self) -> None:
+        """Split the dataset into train, validation and test."""
+        if not os.path.exists(config.AUG_DATASET_PATH):
+            raise Exception("Dataset folder does not exists.")
+
+        data_folders = [f for f in os.listdir(config.AUG_DATASET_PATH)]
+        random.shuffle(data_folders)
+        # calculate sizes
+        dataset_size = len(data_folders)
+        train_size = int(dataset_size * config.TRAIN_SIZE)
+        val_size = int(dataset_size * config.VAL_SIZE)
+        # split into folders
+        train = data_folders[:train_size]
+        val = data_folders[train_size:train_size + val_size]
+        test = data_folders[train_size + val_size:]
+        # move to new folders
+        self._move_folder(src_folders=train, dst_folder=config.AUG_TRAIN_SET_PATH)
+        self._move_folder(src_folders=val, dst_folder=config.AUG_VAL_SET_PATH)
+        self._move_folder(src_folders=test, dst_folder=config.AUG_TEST_SET_PATH)
+
+    @staticmethod
+    def _move_folder(src_folders: List[str], dst_folder: str) -> None:
+        """
+        Create new dst_folder folder and move all folder from src_folders list into it.
+
+        :param src_folders: list with numbers of src folders.
+        :param dst_folder: path to destination folder.
+        """
+        os.mkdir(path=dst_folder)
+        for f in src_folders:
+            src_folder = os.path.join(config.AUG_DATASET_PATH, f)
+            shutil.move(src=src_folder, dst=dst_folder)
+
