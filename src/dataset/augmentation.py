@@ -1,9 +1,9 @@
 import json
 import os
-import time
-from typing import Dict, List, Tuple
 import random
 import shutil
+import time
+from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
@@ -19,7 +19,7 @@ class Augmentation:
     """
 
     def __init__(self) -> None:
-        self._coco: COCO = COCO(config.ANNOTATIONS_PATH)
+        self._coco: COCO = COCO(config.data.ANNOTATIONS_PATH)
         self._classes = {c['name']: c['id'] for c in self._coco.loadCats(self._coco.getCatIds())}
         self._categories: Dict[int, List[int]] = {}
         self._id: int = 0
@@ -47,7 +47,7 @@ class Augmentation:
         :return: image, binary masks of annotations and category ids.
         """
         # load image
-        image_path = os.path.join(config.IMAGES_PATH, self._coco.loadImgs(img_id)[0]['file_name'])
+        image_path = os.path.join(config.data.IMAGES_PATH, self._coco.loadImgs(img_id)[0]['file_name'])
         image = cv2.imread(image_path)
 
         # load annotations
@@ -74,7 +74,7 @@ class Augmentation:
 
         :return: transformed image and masks.
         """
-        augmentations = config.AUGMENTATIONS
+        augmentations = config.data.AUGMENTATIONS
         transformed_data = [(image, masks)]
         for a in augmentations:
             transform = a(image=image, masks=masks)
@@ -94,13 +94,13 @@ class Augmentation:
         :param transformed_data: transformed images and masks (+original).
         :param category_ids: list of categories id's from original image.
         """
-        if os.path.exists(path=config.AUG_DATASET_PATH):
+        if os.path.exists(path=config.data.AUG_DATASET_PATH):
             raise Exception("Augmentations data folder already exists.")
-        os.mkdir(path=config.AUG_DATASET_PATH)
+        os.mkdir(path=config.data.AUG_DATASET_PATH)
 
         for image, masks in transformed_data:
             # create dir for image, masks and categories
-            img_folder_path = os.path.join(config.AUG_DATASET_PATH, str(self._id))
+            img_folder_path = os.path.join(config.data.AUG_DATASET_PATH, str(self._id))
             if os.path.exists(img_folder_path):
                 raise Exception(f"Folder for this image id already exists: {img_folder_path}")
             # save image
@@ -125,28 +125,28 @@ class Augmentation:
             "classes": self._classes,
             "categories": self._categories
         }
-        with open(config.AUG_DATASET_INFO_PATH, "w") as file:
+        with open(config.data.AUG_DATASET_INFO_PATH, "w") as file:
             json.dump(info_data, file, indent=4)
 
     def train_test_split(self) -> None:
         """Split the dataset into train, validation and test."""
-        if not os.path.exists(config.AUG_DATASET_PATH):
+        if not os.path.exists(config.data.AUG_DATASET_PATH):
             raise Exception("Dataset folder does not exists.")
 
-        data_folders = [f for f in os.listdir(config.AUG_DATASET_PATH)]
+        data_folders = [f for f in os.listdir(config.data.AUG_DATASET_PATH)]
         random.shuffle(data_folders)
         # calculate sizes
         dataset_size = len(data_folders)
-        train_size = int(dataset_size * config.TRAIN_SIZE)
-        val_size = int(dataset_size * config.VAL_SIZE)
+        train_size = int(dataset_size * config.data.TRAIN_SIZE)
+        val_size = int(dataset_size * config.data.VAL_SIZE)
         # split into folders
         train = data_folders[:train_size]
         val = data_folders[train_size:train_size + val_size]
         test = data_folders[train_size + val_size:]
         # move to new folders
-        self._move_folder(src_folders=train, dst_folder=config.AUG_TRAIN_SET_PATH)
-        self._move_folder(src_folders=val, dst_folder=config.AUG_VAL_SET_PATH)
-        self._move_folder(src_folders=test, dst_folder=config.AUG_TEST_SET_PATH)
+        self._move_folder(src_folders=train, dst_folder=config.data.AUG_TRAIN_SET_PATH)
+        self._move_folder(src_folders=val, dst_folder=config.data.AUG_VAL_SET_PATH)
+        self._move_folder(src_folders=test, dst_folder=config.data.AUG_TEST_SET_PATH)
 
     @staticmethod
     def _move_folder(src_folders: List[str], dst_folder: str) -> None:
@@ -158,6 +158,6 @@ class Augmentation:
         """
         os.mkdir(path=dst_folder)
         for f in src_folders:
-            src_folder = os.path.join(config.AUG_DATASET_PATH, f)
+            src_folder = os.path.join(config.data.AUG_DATASET_PATH, f)
             shutil.move(src=src_folder, dst=dst_folder)
 
