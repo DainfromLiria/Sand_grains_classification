@@ -1,11 +1,11 @@
 import json
 import os
-import torch
 from typing import Dict, List, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from torch.utils.data import Dataset
 
 from configs import config
@@ -46,12 +46,15 @@ class SandGrainsDataset(Dataset):
             masks.append(mask)
         # TODO transformations (resize)
         # convert masks into tensor
-        tensor_masks = torch.zeros((config.IMAGE_HEIGHT, config.IMAGE_WIDTH, self.info["classes_count"]), dtype=torch.uint8)
+        tensor_masks = torch.zeros(
+            size=(config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH, self.info["classes_count"]),
+            dtype=torch.uint8
+        )
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
             tensor_masks[:, :, c_idx] += torch.tensor(masks[i], dtype=torch.uint8)
         return image, tensor_masks
 
     def _read_info(self):
         """Read file with main information about dataset."""
-        with open(config.AUG_DATASET_INFO_PATH, "r") as file:
+        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
             self.info = json.load(file)
