@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import albumentations as A
+import torch
 
 
 @dataclass
@@ -34,6 +35,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
+    DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
     BATCH_SIZE: int = 16
 
 
