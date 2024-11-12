@@ -13,27 +13,30 @@ from configs import config
 
 class SandGrainsDataset(Dataset):
 
-    def __init__(self) -> None:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._folder_number = [f for f in os.listdir(path)]
         self._read_info()
 
     def __len__(self) -> int:
         return self.info["img_count"]
 
     def __getitem__(self, idx: int):
-        data_path = os.path.join(config.AUG_DATASET_PATH, str(idx))
+        real_idx = self._folder_number[idx]
+        data_path = os.path.join(self.path, real_idx)
         if not os.path.exists(data_path):
-            raise Exception(f"Folder with index {idx} does not exist")
+            raise Exception(f"Folder with index {real_idx} does not exist")
 
         # read image
-        image_path = os.path.join(data_path, f"{idx}.tif")
+        image_path = os.path.join(data_path, f"{real_idx}.tif")
         if not os.path.exists(image_path):
-            raise Exception(f"File with name {idx}.tif does not exist")
+            raise Exception(f"File with name {real_idx}.tif does not exist")
         image = cv2.imread(image_path)
 
         # read masks
         masks_dir = os.path.join(data_path, "masks")
         if not os.path.exists(masks_dir):
-            raise Exception(f"Folder with masks for index {idx} does not exist")
+            raise Exception(f"Folder with masks for index {real_idx} does not exist")
         masks = []
         for file in range(len(os.listdir(masks_dir))):
             mask_path = os.path.join(masks_dir, f"{file}.png")
@@ -44,7 +47,7 @@ class SandGrainsDataset(Dataset):
         # TODO transformations (resize)
         # convert masks into tensor
         tensor_masks = torch.zeros((config.IMAGE_HEIGHT, config.IMAGE_WIDTH, self.info["classes_count"]), dtype=torch.uint8)
-        for i, c_idx in enumerate(self.info["categories"][str(idx)]):
+        for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
             tensor_masks[:, :, c_idx] += torch.tensor(masks[i], dtype=torch.uint8)
         return image, tensor_masks
 
