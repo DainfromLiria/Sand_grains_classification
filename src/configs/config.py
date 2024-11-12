@@ -34,7 +34,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
-    BATCH_SIZE: int = 32
+    BATCH_SIZE: int = 16
 
 
 @dataclass
