@@ -19,7 +19,7 @@ class SandGrainsDataset(Dataset):
         self._read_info()
 
     def __len__(self) -> int:
-        return self.info["img_count"]
+        return len(self._folder_number)
 
     def __getitem__(self, idx: int):
         real_idx = self._folder_number[idx]
