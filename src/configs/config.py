@@ -9,8 +9,15 @@ class DataConfig:
     ANNOTATIONS_PATH: str = "../data/annotations/instances_default.json"
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
+
     AUG_DATASET_PATH: str = "../aug_data"
     AUG_DATASET_INFO_PATH: str = "../aug_data/info.json"
+    AUG_TRAIN_SET_PATH: str = "../aug_data/train"
+    AUG_VAL_SET_PATH: str = "../aug_data/val"
+    AUG_TEST_SET_PATH: str = "../aug_data/test"
+
+    TRAIN_SIZE: float = 0.7
+    VAL_SIZE: float = 0.15
 
     AUGMENTATIONS: list = field(default_factory=lambda: [
         A.HorizontalFlip(p=1.0),
