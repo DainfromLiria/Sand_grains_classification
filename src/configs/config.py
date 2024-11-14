@@ -12,6 +12,7 @@ class DataConfig:
     ANNOTATIONS_PATH: str = "../data/annotations/instances_default.json"
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
+    IMAGE_RESIZED: int = 520
 
     AUG_DATASET_PATH: str = "../aug_data"
     AUG_DATASET_INFO_PATH: str = "../aug_data/info.json"
@@ -34,10 +35,13 @@ class DataConfig:
     ])
 
     # for DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1
-    TRAIN_TRANSFORMATION: A.Compose = A.Compose([
+    IMAGE_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
         A.Normalize(),
         A.Resize(height=520, width=520),
         ToTensorV2()
+    ])
+    MASK_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
+        A.Resize(height=520, width=520)
     ])
 
 
