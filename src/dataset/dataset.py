@@ -32,7 +32,7 @@ class SandGrainsDataset(Dataset):
         image_path = os.path.join(data_path, f"{real_idx}.tif")
         if not os.path.exists(image_path):
             raise Exception(f"File with name {real_idx}.tif does not exist")
-        image = cv2.imread(image_path)
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         image = config.data.TRAIN_TRANSFORMATION(image=image)["image"]
 
         # read masks
