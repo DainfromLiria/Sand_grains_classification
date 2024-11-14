@@ -17,15 +17,14 @@ class MicroTextureDetector:
 
     def __init__(self):
         torch.hub.set_dir(config.model.MODELS_DIR_PATH)  # TODO move to some setup file
-        device = config.model.DEVICE
-        logger.info(f"Device: {device}")
+        logger.info(f"Device: {config.model.DEVICE}")
         self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
         # ============================================================================================================
         # change first conv layer of backbone nn (ResNet101) for grayscale images
         # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
         self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         # ============================================================================================================
-        self.model.to(device)
+        self.model.to(config.model.DEVICE)
         self._make_data_loader()
 
     def train(self) -> None:
@@ -56,8 +55,7 @@ class MicroTextureDetector:
         """
         running_cum_loss = 0
         for images, masks in tqdm(self.train_loader, desc="Train one Epoch"):
-            device = config.model.DEVICE
-            images, masks = images.float().to(device), masks.float().to(device)
+            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             optimizer.zero_grad()  # reset the gradients for new batch
             outputs = self.model(images)  # forward
             loss = loss_fn(outputs, masks)  # compute loss
