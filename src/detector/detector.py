@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.models.segmentation import (DeepLabV3_ResNet101_Weights,
                                              deeplabv3_resnet101)
+from tqdm import tqdm
 
 from configs import config
 from dataset import SandGrainsDataset
@@ -14,44 +15,65 @@ logger = logging.getLogger(__name__)
 class MicroTextureDetector:
 
     def __init__(self):
-        torch.hub.set_dir(config.model.MODELS_DIR_PATH)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        torch.hub.set_dir(config.model.MODELS_DIR_PATH)  # TODO move to some setup file
+        device = config.model.DEVICE
         logger.info(f"Device: {device}")
         self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
         self.model.to(device)
         self._make_data_loader()
-        logger.info(f"Data loader type: {type(self.train_loader)}")
+
+    def train(self) -> None:
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
+        activation_function = torch.nn.ReLU()
+        loss_fn = torch.nn.CrossEntropyLoss()
+        self._train_loop(optimizer, activation_function, loss_fn)
 
     def _make_data_loader(self):
-        train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
-        val_dataset = SandGrainsDataset(path=config.data.AUG_VAL_SET_PATH)
-        test_dataset = SandGrainsDataset(path=config.data.AUG_TEST_SET_PATH)
+        self.train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
+        logger.info(f"Train dataset size: {len(self.train_dataset)}")
+        self.val_dataset = SandGrainsDataset(path=config.data.AUG_VAL_SET_PATH)
+        logger.info(f"Val dataset size: {len(self.val_dataset)}")
+        self.test_dataset = SandGrainsDataset(path=config.data.AUG_TEST_SET_PATH)
+        logger.info(f"Test dataset size: {len(self.test_dataset)}")
         # TODO add num_workers
-        self.train_loader = DataLoader(dataset=train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-        self.val_loader = DataLoader(dataset=val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-        self.test_loader = DataLoader(dataset=test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+        self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+        self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+        self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
 
+    def _train_one_epoch(self, optimizer, activation_function, loss_fn) -> float:
+        """
+        Train one epoch
 
+        :param optimizer: optimizer
+        :param activation_function: activation function for model hidden layers
+        :param loss_fn: loss function
 
-    # def _train_one_epoch(self, model, loss_fn, optimizer, activation_function, data_loader):
-    #     running_cum_loss = 0
-    #
-    #     for data in data_loader:
-    #         inputs, labels = data
-    #
-    #         optimizer.zero_grad()  # Sets the gradients of all optimized torch Tensors to zero.
-    #         outputs = model(inputs, activation_function)  # forward
-    #         loss = loss_fn(outputs, labels)  # compute loss
-    #         loss.backward()  # backward prop
-    #         optimizer.step()  # step of input optimizer
-    #
-    #         # find train loss after one epoch and return it
-    #         last_mean_loss = loss.item()  # get loss on this batch
-    #         running_cum_loss += last_mean_loss * inputs.shape[
-    #             0]  # sum of multiplys loss*size_of_batch(last batch not always 32) for compute average train loss
-    #     return running_cum_loss / len(Xtrain)  # return average train loss after one epoch
-    #
-    #
+        :return: average train loss for current epoch
+        """
+        running_cum_loss = 0
+        for images, masks in tqdm(self.train_loader, desc="Train one Epoch"):
+            device = config.model.DEVICE
+            images, masks = images.float().to(device), masks.float().to(device)
+            optimizer.zero_grad()  # reset the gradients for new batch
+            outputs = self.model(images)  # forward
+            loss = loss_fn(outputs, masks)  # compute loss
+            loss.backward()  # backward
+            optimizer.step()  # step of input optimizer
+
+            # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
+            running_cum_loss += loss.item() * images.shape[0]
+        return running_cum_loss / len(self.train_dataset)
+
+    def _train_loop(self, optimizer, activation_function, loss_fn) -> None:
+        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
+            self.model.train()  # set model in training mode.
+            epoch_loss = self._train_one_epoch(
+                optimizer=optimizer,
+                activation_function=activation_function,
+                loss_fn=loss_fn
+            )
+            self.model.eval()  # set model in evaluation mode.
+
     # def trainNN(self, model, loss_fn, optimizer, epoch_count, printInfo=False,
     #             acc_arr=None, activation_function=F.relu, onEarlyStop=False, showGraph=False,
     #             train_data_loader=train_loader, val_data_loader=val_loader):
