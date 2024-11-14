@@ -24,9 +24,8 @@ class MicroTextureDetector:
 
     def train(self) -> None:
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
-        activation_function = torch.nn.ReLU()
         loss_fn = torch.nn.CrossEntropyLoss()
-        self._train_loop(optimizer, activation_function, loss_fn)
+        self._train_loop(optimizer, loss_fn)
 
     def _make_data_loader(self):
         self.train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
@@ -40,12 +39,11 @@ class MicroTextureDetector:
         self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
 
-    def _train_one_epoch(self, optimizer, activation_function, loss_fn) -> float:
+    def _train_one_epoch(self, optimizer, loss_fn) -> float:
         """
         Train one epoch
 
         :param optimizer: optimizer
-        :param activation_function: activation function for model hidden layers
         :param loss_fn: loss function
 
         :return: average train loss for current epoch
@@ -64,14 +62,10 @@ class MicroTextureDetector:
             running_cum_loss += loss.item() * images.shape[0]
         return running_cum_loss / len(self.train_dataset)
 
-    def _train_loop(self, optimizer, activation_function, loss_fn) -> None:
+    def _train_loop(self, optimizer, loss_fn) -> None:
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
             self.model.train()  # set model in training mode.
-            epoch_loss = self._train_one_epoch(
-                optimizer=optimizer,
-                activation_function=activation_function,
-                loss_fn=loss_fn
-            )
+            epoch_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
             self.model.eval()  # set model in evaluation mode.
 
     # def trainNN(self, model, loss_fn, optimizer, epoch_count, printInfo=False,
