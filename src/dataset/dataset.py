@@ -33,7 +33,7 @@ class SandGrainsDataset(Dataset):
         if not os.path.exists(image_path):
             raise Exception(f"File with name {real_idx}.tif does not exist")
         image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        image = config.data.TRAIN_TRANSFORMATION(image=image)["image"]
+        image = config.data.IMAGE_TRAIN_TRANSFORMATION(image=image)["image"]
 
         # read masks
         masks_dir = os.path.join(data_path, "masks")
@@ -45,15 +45,15 @@ class SandGrainsDataset(Dataset):
             if not os.path.exists(mask_path):
                 raise Exception(f"Mask with index {file} does not exist")
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            mask = config.data.MASK_TRAIN_TRANSFORMATION(image=mask)["image"]  # resize
             masks.append(mask)
-        # TODO transformations (resize)
         # convert masks into tensor
         tensor_masks = torch.zeros(
-            size=(self.info["classes_count"], config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH),
+            size=(self.info["classes_count"], config.data.IMAGE_RESIZED, config.data.IMAGE_RESIZED),
             dtype=torch.uint8
         )
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
-            tensor_masks[c_idx, :, :] += torch.tensor(masks[i], dtype=torch.long)
+            tensor_masks[c_idx, :, :] += torch.tensor(masks[i], dtype=torch.uint8)
         return image, tensor_masks
 
     def _read_info(self):
