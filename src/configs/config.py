@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import torch
+import cv2
 
 
 @dataclass
@@ -32,7 +33,10 @@ class DataConfig:
         A.ShiftScaleRotate(p=1.0)  # use it instead of Rotate because it can make rotate, translate or scale
     ])
 
+    # for DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1
     TRAIN_TRANSFORMATION: A.Compose = A.Compose([
+        A.Normalize(),
+        A.Resize(height=520, width=520),
         ToTensorV2()
     ])
 
