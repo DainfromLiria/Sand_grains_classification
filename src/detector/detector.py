@@ -20,8 +20,11 @@ class MicroTextureDetector:
         device = config.model.DEVICE
         logger.info(f"Device: {device}")
         self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
+        # ============================================================================================================
         # change first conv layer of backbone nn (ResNet101) for grayscale images
+        # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
         self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # ============================================================================================================
         self.model.to(device)
         self._make_data_loader()
 
