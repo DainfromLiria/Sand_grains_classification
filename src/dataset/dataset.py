@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from typing import Dict, List, Tuple
 
@@ -32,6 +33,7 @@ class SandGrainsDataset(Dataset):
         if not os.path.exists(image_path):
             raise Exception(f"File with name {real_idx}.tif does not exist")
         image = cv2.imread(image_path)
+        image = config.data.TRAIN_TRANSFORMATION(image=image)["image"]
 
         # read masks
         masks_dir = os.path.join(data_path, "masks")
@@ -47,11 +49,11 @@ class SandGrainsDataset(Dataset):
         # TODO transformations (resize)
         # convert masks into tensor
         tensor_masks = torch.zeros(
-            size=(config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH, self.info["classes_count"]),
+            size=(self.info["classes_count"], config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH),
             dtype=torch.uint8
         )
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
-            tensor_masks[:, :, c_idx] += torch.tensor(masks[i], dtype=torch.uint8)
+            tensor_masks[c_idx, :, :] += torch.tensor(masks[i], dtype=torch.long)
         return image, tensor_masks
 
     def _read_info(self):
