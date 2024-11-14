@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import torch
 
 
@@ -31,12 +32,17 @@ class DataConfig:
         A.ShiftScaleRotate(p=1.0)  # use it instead of Rotate because it can make rotate, translate or scale
     ])
 
+    TRAIN_TRANSFORMATION: A.Compose = A.Compose([
+        ToTensorV2()
+    ])
+
 
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
-    DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
+    DEVICE: str = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     BATCH_SIZE: int = 16
+    EPOCH_COUNT: int = 1  # TODO increase to ~100
 
 
 @dataclass
