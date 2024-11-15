@@ -1,4 +1,5 @@
 import logging
+from typing import Tuple
 
 import torch
 from torch import nn
@@ -44,6 +45,11 @@ class MicroTextureDetector:
         self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
 
+    def _train_loop(self, optimizer, loss_fn) -> None:
+        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
+            train_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
+            val_loss, val_acc = self._validation_loop(loss_fn=loss_fn)
+
     def _train_one_epoch(self, optimizer, loss_fn) -> float:
         """
         Train one epoch
@@ -53,7 +59,8 @@ class MicroTextureDetector:
 
         :return: average train loss for current epoch
         """
-        running_cum_loss = 0
+        self.model.train()  # set model in training mode.
+        running_cum_loss = 0.0
         for images, masks in tqdm(self.train_loader, desc="Train one Epoch"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             optimizer.zero_grad()  # reset the gradients for new batch
@@ -66,11 +73,28 @@ class MicroTextureDetector:
             running_cum_loss += loss.item() * images.shape[0]
         return running_cum_loss / len(self.train_dataset)
 
-    def _train_loop(self, optimizer, loss_fn) -> None:
-        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
-            self.model.train()  # set model in training mode.
-            epoch_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
-            self.model.eval()  # set model in evaluation mode.
+    def _validation_loop(self, loss_fn) -> Tuple[float, float]:
+        """
+        Calculate validation loss and accuracy on validation data
+
+        :return: average loss and accuracy on validation data
+        """
+        self.model.eval()  # set model in evaluation mode.
+        running_cum_loss = 0.0
+        vcorrect = 0
+        for images, masks in tqdm(self.val_loader, desc="Validate model"):
+            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+            with torch.no_grad():
+                outputs = self.model(images)
+                loss = loss_fn(outputs, masks)
+            # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
+            running_cum_loss += loss.items() * images.shape[0]
+            # get count the correctly classified samples on val data
+            vcorrect += (voutputs.argmax(1) == vlabels).float().sum()
+        avg_loss = running_cum_loss / len(self.val_dataset)
+        acc = vcorrect / len(self.val_dataset)
+        return avg_loss, acc
 
     # def trainNN(self, model, loss_fn, optimizer, epoch_count, printInfo=False,
     #             acc_arr=None, activation_function=F.relu, onEarlyStop=False, showGraph=False,
