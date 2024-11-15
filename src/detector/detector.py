@@ -19,14 +19,16 @@ class MicroTextureDetector:
     def __init__(self):
         torch.hub.set_dir(config.model.MODELS_DIR_PATH)  # TODO move to some setup file
         logger.info(f"Device: {config.model.DEVICE}")
+        self._make_data_loader()
         self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
         # ============================================================================================================
         # change first conv layer of backbone nn (ResNet101) for grayscale images
         # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
         self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         # ============================================================================================================
+        # change the last layer output classes
+        self.model.classifier[-1] = torch.nn.Conv2d(256, self.classes_count, 1)
         self.model.to(config.model.DEVICE)
-        self._make_data_loader()
 
     def train(self) -> None:
         optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
@@ -35,6 +37,8 @@ class MicroTextureDetector:
 
     def _make_data_loader(self):
         self.train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
+        self.classes_count = self.train_dataset.info["classes_count"]
+        logger.info(f"Dataset classes count: {self.classes_count}")
         logger.info(f"Train dataset size: {len(self.train_dataset)}")
         self.val_dataset = SandGrainsDataset(path=config.data.AUG_VAL_SET_PATH)
         logger.info(f"Val dataset size: {len(self.val_dataset)}")
@@ -48,7 +52,7 @@ class MicroTextureDetector:
     def _train_loop(self, optimizer, loss_fn) -> None:
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
             train_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
-            val_loss, val_acc = self._validation_loop(loss_fn=loss_fn)
+            # val_loss, val_acc = self._validation_loop(loss_fn=loss_fn)
 
     def _train_one_epoch(self, optimizer, loss_fn) -> float:
         """
@@ -64,7 +68,7 @@ class MicroTextureDetector:
         for images, masks in tqdm(self.train_loader, desc="Train one Epoch"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             optimizer.zero_grad()  # reset the gradients for new batch
-            outputs = self.model(images)  # forward
+            outputs = self.model(images)['out']  # forward
             loss = loss_fn(outputs, masks)  # compute loss
             loss.backward()  # backward
             optimizer.step()  # step of input optimizer
@@ -91,7 +95,7 @@ class MicroTextureDetector:
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.items() * images.shape[0]
             # get count the correctly classified samples on val data
-            vcorrect += (voutputs.argmax(1) == vlabels).float().sum()
+            # vcorrect += (voutputs.argmax(1) == vlabels).float().sum()
         avg_loss = running_cum_loss / len(self.val_dataset)
         acc = vcorrect / len(self.val_dataset)
         return avg_loss, acc
