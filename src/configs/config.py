@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
 
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
-import torch
 import cv2
+import torch
+from albumentations.pytorch import ToTensorV2
 
 
 @dataclass
