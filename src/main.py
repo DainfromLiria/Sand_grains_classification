@@ -1,9 +1,10 @@
+import logging
+
 from configs.config import config
 from dataset.augmentation import Augmentation
 from dataset.dataset import SandGrainsDataset
 from detector.detector import MicroTextureDetector
 from utils.logging import setup_logging
-import logging
 
 setup_logging()
 
