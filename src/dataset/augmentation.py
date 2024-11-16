@@ -9,8 +9,12 @@ import cv2
 import numpy as np
 from pycocotools.coco import COCO
 from tqdm import tqdm
+import logging
 
 from configs import config
+
+
+logger = logging.getLogger(__name__)
 
 
 class Augmentation:
@@ -20,7 +24,7 @@ class Augmentation:
 
     def __init__(self) -> None:
         self._coco: COCO = COCO(config.data.ANNOTATIONS_PATH)
-        self._classes = {c['name']: c['id'] for c in self._coco.loadCats(self._coco.getCatIds())}
+        self._classes = {c['name']: c['id']-1 for c in self._coco.loadCats(self._coco.getCatIds())}
         self._categories: Dict[int, List[int]] = {}
         self._id: int = 0
 
@@ -28,15 +32,22 @@ class Augmentation:
         """Main public function of this class."""
         img_ids = self._coco.getImgIds()
         t_begin = time.monotonic()
+        i = 0 # TODO remove it
         for img_id in tqdm(img_ids, desc="Augmentation"):
             image, masks, category_ids = self._load(img_id)
             transformed_data = self._apply_augmentations(image=image, masks=masks)
             self._save(transformed_data=transformed_data, category_ids=category_ids)
-            break  # TODO remove it
+            # TODO remove it
+            # =======================================================================================================
+            if i >= 2:
+                break
+            else:
+                i += 1
+            # =======================================================================================================
         t_end = time.monotonic()
         self.train_test_split()
         self._create_dataset_info()
-        print(f"Time taken for generating new dataset: {round(t_end - t_begin, 2)}s")
+        logger.info(f"Time taken for generating new dataset: {round(t_end - t_begin, 2)}s")
 
     def _load(self, img_id: int) -> Tuple[np.ndarray, List[np.ndarray], List[int]]:
         """
@@ -58,7 +69,7 @@ class Augmentation:
         masks = []
 
         for ann in annotations:
-            category_ids.append(ann['category_id'])
+            category_ids.append(ann['category_id'] - 1)
             mask = self._coco.annToMask(ann)
             masks.append(mask)
 
@@ -94,9 +105,8 @@ class Augmentation:
         :param transformed_data: transformed images and masks (+original).
         :param category_ids: list of categories id's from original image.
         """
-        if os.path.exists(path=config.data.AUG_DATASET_PATH):
-            raise Exception("Augmentations data folder already exists.")
-        os.mkdir(path=config.data.AUG_DATASET_PATH)
+        if not os.path.exists(path=config.data.AUG_DATASET_PATH):
+            os.mkdir(path=config.data.AUG_DATASET_PATH)
 
         for image, masks in transformed_data:
             # create dir for image, masks and categories
