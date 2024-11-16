@@ -49,7 +49,7 @@ class DataConfig:
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
     DEVICE: str = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    BATCH_SIZE: int = 16
+    BATCH_SIZE: int = 10
     EPOCH_COUNT: int = 1  # TODO increase to ~100
 
 
