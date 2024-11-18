@@ -52,6 +52,9 @@ class ModelConfig:
     BATCH_SIZE: int = 10
     EPOCH_COUNT: int = 1  # TODO increase to ~100
 
+    # Focal Loss configs
+    GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
+
 
 @dataclass
 class Configs:
