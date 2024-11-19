@@ -19,7 +19,9 @@ class FocalLoss(nn.Module):
         logger.info(f"inputs: {inputs}")
         targets = targets.flatten()
         logger.info(f"targets: {targets}")
-        bce_loss = F.binary_cross_entropy(inputs, targets)
+        bce_loss = F.binary_cross_entropy(inputs, targets, reduction='none')  # -log(pt)
+        logger.info(f"bce_loss: {bce_loss}")
         pt = torch.exp(-bce_loss)
-        focal_loss = (1 - pt)**2 * bce_loss
-        logger.info(f"focal_loss: {focal_loss}")
+        logger.info(f"pt: {pt}")
+        focal_loss = (torch.tensor(1) - pt)**2 * bce_loss
+        return torch.mean(focal_loss)
