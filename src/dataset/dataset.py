@@ -53,7 +53,7 @@ class SandGrainsDataset(Dataset):
             dtype=torch.uint8
         )
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
-            tensor_masks[c_idx, :, :] += torch.tensor(masks[i], dtype=torch.uint8)
+            tensor_masks[c_idx, :, :] = tensor_masks[c_idx, :, :] | torch.tensor(masks[i], dtype=torch.uint8)
         return image, tensor_masks
 
     def _read_info(self):
