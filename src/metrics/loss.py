@@ -16,7 +16,6 @@ class FocalLoss(nn.Module):
 
         inputs = inputs.flatten()
         targets = targets.flatten()
-
         alpha = self._get_alpha(targets)
         bce_loss = F.binary_cross_entropy(weight=alpha, input=inputs, target=targets, reduction='none')  # -log(pt)
         pt = torch.exp(-bce_loss)
@@ -36,12 +35,11 @@ class FocalLoss(nn.Module):
         assert targets.dim() == 1  # check if value is vector
         try:
             N = len(targets)
-            p1 = sum(targets)
-            p0 = N - p1
-            w0 = N / (2 * p0)
-            w1 = N / (2 * p1)
-            alpha = torch.tensor([w0 if t == 0 else w1 for t in targets])
+            _, p = torch.unique(targets, return_counts=True)
+            w0 = N / (2 * p[0])
+            w1 = N / (2 * p[1])
+            alpha = torch.where(targets == 0, w0, w1)
             return alpha
-        except ZeroDivisionError as e:
+        except Exception as e:
             logger.error(f"{e}")  # in case if all mask contains only 0 or 1
-            raise ZeroDivisionError
+            raise e
