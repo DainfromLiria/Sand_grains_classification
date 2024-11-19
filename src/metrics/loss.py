@@ -15,17 +15,13 @@ class FocalLoss(nn.Module):
         inputs = torch.sigmoid(inputs)
 
         inputs = inputs.flatten()
-        logger.info(f"inputs: {inputs}")
         targets = targets.flatten()
-        logger.info(f"targets: {targets}")
+
         alpha = self._get_alpha(targets)
         bce_loss = F.binary_cross_entropy(weight=alpha, input=inputs, target=targets, reduction='none')  # -log(pt)
-        logger.info(f"bce_loss: {bce_loss}")
         pt = torch.exp(-bce_loss)
-        logger.info(f"pt: {pt}")
-        focal_loss = (torch.tensor(1) - pt)**config.model.GAMMA * bce_loss
-        logger.info(f"focal_loss: {focal_loss}")
-        return torch.mean(focal_loss)
+        focal_loss_per_pixel = (torch.tensor(1) - pt)**config.model.GAMMA * bce_loss
+        return torch.mean(focal_loss_per_pixel)
 
     @staticmethod
     def _get_alpha(targets: torch.Tensor) -> torch.Tensor:
