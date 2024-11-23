@@ -4,11 +4,11 @@ from typing import Tuple
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision.models.segmentation import (DeepLabV3_ResNet101_Weights,
-                                             deeplabv3_resnet101)
+from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
 from tqdm import tqdm
 
 from configs import config
+from metrics import FocalLoss, calculate_metrics
 from dataset import SandGrainsDataset
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class MicroTextureDetector:
         torch.hub.set_dir(config.model.MODELS_DIR_PATH)  # TODO move to some setup file
         logger.info(f"Device: {config.model.DEVICE}")
         self._make_data_loader()
-        self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
+        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
         # ============================================================================================================
         # change first conv layer of backbone nn (ResNet101) for grayscale images
         # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
@@ -31,8 +31,8 @@ class MicroTextureDetector:
         self.model.to(config.model.DEVICE)
 
     def train(self) -> None:
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
-        loss_fn = torch.nn.CrossEntropyLoss()
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
+        loss_fn = FocalLoss()
         self._train_loop(optimizer, loss_fn)
 
     def _make_data_loader(self):
@@ -51,21 +51,23 @@ class MicroTextureDetector:
 
     def _train_loop(self, optimizer, loss_fn) -> None:
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
+            logger.info(f"EPOCH {epoch}")
             train_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
-            # val_loss, val_acc = self._validation_loop(loss_fn=loss_fn)
+            val_loss = self._validate_one_epoch(loss_fn=loss_fn)
+            logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
 
     def _train_one_epoch(self, optimizer, loss_fn) -> float:
         """
-        Train one epoch
+        Train one epoch.
 
         :param optimizer: optimizer
         :param loss_fn: loss function
 
-        :return: average train loss for current epoch
+        :return: average train loss per epoch.
         """
         self.model.train()  # set model in training mode.
         running_cum_loss = 0.0
-        for images, masks in tqdm(self.train_loader, desc="Train one Epoch"):
+        for images, masks in self.train_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             optimizer.zero_grad()  # reset the gradients for new batch
             outputs = self.model(images)['out']  # forward
@@ -75,30 +77,38 @@ class MicroTextureDetector:
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
-        return running_cum_loss / len(self.train_dataset)
+        avg_train_loss = running_cum_loss / len(self.train_dataset)
+        return avg_train_loss
 
-    def _validation_loop(self, loss_fn) -> Tuple[float, float]:
+    def _validate_one_epoch(self, loss_fn) -> float:
         """
-        Calculate validation loss and accuracy on validation data
+        Calculate loss and metrics on validation dataset.
 
-        :return: average loss and accuracy on validation data
+        :param loss_fn: loss function.
+
+        :return: average validation loss per epoch.
         """
         self.model.eval()  # set model in evaluation mode.
         running_cum_loss = 0.0
-        vcorrect = 0
-        for images, masks in tqdm(self.val_loader, desc="Validate model"):
+        metrics = torch.zeros((3, self.classes_count))  # TODO add constant to metric count
+        batch_count = 0
+        for images, masks in self.val_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                outputs = self.model(images)
+                outputs = self.model(images)['out']
                 loss = loss_fn(outputs, masks)
-            # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
-            running_cum_loss += loss.items() * images.shape[0]
-            # get count the correctly classified samples on val data
-            # vcorrect += (voutputs.argmax(1) == vlabels).float().sum()
-        avg_loss = running_cum_loss / len(self.val_dataset)
-        acc = vcorrect / len(self.val_dataset)
-        return avg_loss, acc
+            metrics += calculate_metrics(outputs, masks).to("cpu")
+            running_cum_loss += loss * images.shape[0]
+            batch_count += 1
+        # calculate loss and metrics per epoch
+        avg_val_loss = running_cum_loss / len(self.val_dataset)
+        avg_metrics_per_class = metrics / batch_count
+        avg_metrics = torch.mean(avg_metrics_per_class, 1)
+        # logger.info(f"Avg metrics per class: {avg_metrics_per_class}")
+        logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
+        return avg_val_loss
+
 
     # def trainNN(self, model, loss_fn, optimizer, epoch_count, printInfo=False,
     #             acc_arr=None, activation_function=F.relu, onEarlyStop=False, showGraph=False,
