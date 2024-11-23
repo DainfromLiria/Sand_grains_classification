@@ -12,6 +12,14 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate alpha weighted focal loss for all input batch. Use mean for reduction.
+
+        :param inputs: output of last nn layer.
+        :param targets: masks.
+
+        :return: mean alpha weighted focal loss for batch.
+        """
         inputs = torch.sigmoid(inputs)
 
         inputs = inputs.flatten()
