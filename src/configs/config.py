@@ -20,8 +20,8 @@ class DataConfig:
     AUG_VAL_SET_PATH: str = "../aug_data/val"
     AUG_TEST_SET_PATH: str = "../aug_data/test"
 
-    TRAIN_SIZE: float = 0.7
-    VAL_SIZE: float = 0.15
+    TRAIN_SIZE: float = 0.8
+    VAL_SIZE: float = 0.10
 
     AUGMENTATIONS: list = field(default_factory=lambda: [
         A.HorizontalFlip(p=1.0),
@@ -49,11 +49,16 @@ class DataConfig:
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
     DEVICE: str = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    BATCH_SIZE: int = 10
-    EPOCH_COUNT: int = 1  # TODO increase to ~100
+    BATCH_SIZE: int = 12
+    LEARNING_RATE: float = 1e-3  # TODO maybe use default lr
+    EPOCH_COUNT: int = 5  # TODO increase to ~100
 
     # Focal Loss configs
     GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
+
+    # Early stopping config
+    PATIENCE: int = 50
+    BEST_MODEL_PATH: str = "../models/best_model.pt"
 
 
 @dataclass
