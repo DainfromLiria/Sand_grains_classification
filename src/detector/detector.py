@@ -50,11 +50,25 @@ class MicroTextureDetector:
         self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
 
     def _train_loop(self, optimizer, loss_fn) -> None:
+        best_loss = float("inf")
+        patience = config.model.PATIENCE
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
             logger.info(f"EPOCH {epoch}")
             train_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
             val_loss = self._validate_one_epoch(loss_fn=loss_fn)
             logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
+
+            # early stopping
+            if val_loss < best_loss:
+                best_loss = val_loss
+                patience = config.model.PATIENCE
+                torch.save(self.model.state_dict(), config.model.BEST_MODEL_PATH)
+                logger.info("Best model saved")
+            else:
+                patience -= 1
+                if patience <= 0:
+                    break
+
 
     def _train_one_epoch(self, optimizer, loss_fn) -> float:
         """
