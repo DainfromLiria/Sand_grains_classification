@@ -1,34 +1,42 @@
 import torch
-import numpy as np
-from collections import defaultdict
 import logging
-from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
 
-def IOU(inputs: torch.Tensor, targets: torch.Tensor):
+def confusion_matrix(inputs: torch.Tensor, targets: torch.Tensor):
     """
-    Calculate Interception Over Union per class.
+    Calculate confusion matrix.
 
-    :param inputs: predictions.
-    :param targets: trues.
+    :param inputs: inputs with predictions (values 0 or 1).
+    :param targets: binary masks.
 
-    :return: IOU per class.
+    :return: confusion matrix values in order tp, fp, fn, tn. All values are torch.Tensor.
     """
-    interception = torch.logical_and(inputs, targets)
-    union = torch.logical_or(inputs, targets)
-    interception_sum = torch.sum(interception, dim=(0, 2, 3), keepdim=True)
-    union_sum = torch.sum(union, dim=(0, 2, 3), keepdim=True)
-    return interception_sum / union_sum
+    # calculate TP
+    tp_mat = torch.logical_and(inputs, targets)
+    tp = torch.sum(tp_mat, dim=(0, 2, 3), keepdim=True)
+    # calculate FP and FN
+    inp_xor_target = torch.logical_xor(inputs, targets)
+    fp_mat = torch.logical_and(inp_xor_target, inputs)
+    fp = torch.sum(fp_mat, dim=(0, 2, 3), keepdim=True)
+    fn_mat = torch.logical_and(inp_xor_target, targets)
+    fn = torch.sum(fn_mat, dim=(0, 2, 3), keepdim=True)
+    # calculate TN
+    tn_mat = torch.logical_not(torch.logical_or(inputs, targets))
+    tn = torch.sum(tn_mat, dim=(0, 2, 3), keepdim=True)
+    return tp, fp, fn, tn
 
 
-def calculate_metrics(inputs: torch.Tensor, targets: torch.Tensor):
+def calculate_metrics(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    eps = 1e-6  # for situations when mask and target contains only zeros
     inputs = torch.sigmoid(inputs)
-    inputs = (inputs >= 0.5).long()  # convert probabilities into labels
+    inputs = (inputs >= 0.5).int()  # convert probabilities into labels
 
-    iou_per_class = IOU(inputs, targets)
-    mean_iou = torch.mean(iou_per_class)
-    logger.info(f"IOU per class: {iou_per_class.flatten().tolist()}")
-    logger.info(f"IOU Mean: {mean_iou}")
+    tp, fp, fn, tn = confusion_matrix(inputs=inputs, targets=targets)
 
+    precision_per_class = torch.squeeze(tp / (tp + fp + eps))
+    recall_per_class = torch.squeeze(tp / (tp + fn + eps))
+    iou_per_class = torch.squeeze(tp / (tp + fp + fn + eps))
+
+    return torch.stack((iou_per_class, recall_per_class, precision_per_class))
