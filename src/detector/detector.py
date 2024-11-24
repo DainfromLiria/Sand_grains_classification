@@ -11,6 +11,7 @@ from tqdm import tqdm
 from configs import config
 from metrics import FocalLoss, calculate_metrics
 from dataset import SandGrainsDataset
+from visualizer import Visualizer
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +23,21 @@ class MicroTextureDetector:
         if train is True:
             self._load_data()
         self._load_model(model_path)
+        self.visualizer = Visualizer()
 
     def train(self) -> None:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
         loss_fn = FocalLoss()
-        self._train_loop(optimizer, loss_fn)
+        folder_name = (f"{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
+                       f"_batches_{config.model.LEARNING_RATE}_lr")
+        if not os.path.exists(config.model.RESULTS_DIR):
+            os.mkdir(config.model.RESULTS_DIR)
+        results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
+        if not os.path.exists(results_folder_path):
+            os.mkdir(results_folder_path)
+        logger.info(f"Results saved into: {results_folder_path}")
+        self._train_loop(optimizer, loss_fn, results_folder_path)
+        self.visualizer.visualize(results_folder_path)
 
     def _load_data(self):
         """Load train, validation and test datasets and create DataLoaders."""
@@ -68,7 +79,7 @@ class MicroTextureDetector:
 
         self.model.to(config.model.DEVICE)
 
-    def _train_loop(self, optimizer, loss_fn) -> None:
+    def _train_loop(self, optimizer, loss_fn, results_folder_path: str) -> None:
         """
         Train and evaluate model on config.model.EPOCH_COUNT epochs.
 
@@ -87,7 +98,8 @@ class MicroTextureDetector:
             if val_loss < best_loss:
                 best_loss = val_loss
                 patience = config.model.PATIENCE
-                torch.save(self.model.state_dict(), config.model.BEST_MODEL_PATH)
+                model_path = os.path.join(results_folder_path, "model.pt")
+                torch.save(self.model.state_dict(), model_path)
                 logger.info("Best model saved")
             else:
                 patience -= 1
@@ -116,6 +128,7 @@ class MicroTextureDetector:
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
         avg_train_loss = running_cum_loss / len(self.train_dataset)
+        self.visualizer.train_loss.append(avg_train_loss)
         return avg_train_loss
 
     def _validate_one_epoch(self, loss_fn) -> float:
@@ -137,12 +150,14 @@ class MicroTextureDetector:
                 outputs = self.model(images)['out']
                 loss = loss_fn(outputs, masks)
             metrics += calculate_metrics(outputs, masks).to("cpu")
-            running_cum_loss += loss * images.shape[0]
+            running_cum_loss += loss.item() * images.shape[0]
             batch_count += 1
         # calculate loss and metrics per epoch
         avg_val_loss = running_cum_loss / len(self.val_dataset)
         avg_metrics_per_class = metrics / batch_count
         avg_metrics = torch.mean(avg_metrics_per_class, 1)
-        # logger.info(f"Avg metrics per class: {avg_metrics_per_class}")  # TODO
         logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
+        # save data for visualizations
+        self.visualizer.store_metrics(avg_metrics.numpy(), avg_metrics_per_class.numpy())
+        self.visualizer.validation_loss.append(avg_val_loss)
         return avg_val_loss
