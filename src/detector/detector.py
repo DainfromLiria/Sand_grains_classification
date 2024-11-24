@@ -1,4 +1,5 @@
 import logging
+import os.path
 from typing import Tuple
 
 import torch
@@ -16,26 +17,19 @@ logger = logging.getLogger(__name__)
 
 class MicroTextureDetector:
 
-    def __init__(self):
-        torch.hub.set_dir(config.model.MODELS_DIR_PATH)  # TODO move to some setup file
+    def __init__(self, model_path: str = None, train: bool = True):
         logger.info(f"Device: {config.model.DEVICE}")
-        self._make_data_loader()
-        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
-        # ============================================================================================================
-        # change first conv layer of backbone nn (ResNet101) for grayscale images
-        # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
-        self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        # ============================================================================================================
-        # change the last layer output classes
-        self.model.classifier[-1] = torch.nn.Conv2d(256, self.classes_count, 1)
-        self.model.to(config.model.DEVICE)
+        if train is True:
+            self._load_data()
+        self._load_model(model_path)
 
     def train(self) -> None:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
         loss_fn = FocalLoss()
         self._train_loop(optimizer, loss_fn)
 
-    def _make_data_loader(self):
+    def _load_data(self):
+        """Load train, validation and test datasets and create DataLoaders."""
         self.train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
         self.classes_count = self.train_dataset.info["classes_count"]
         logger.info(f"Dataset classes count: {self.classes_count}")
@@ -44,12 +38,43 @@ class MicroTextureDetector:
         logger.info(f"Val dataset size: {len(self.val_dataset)}")
         self.test_dataset = SandGrainsDataset(path=config.data.AUG_TEST_SET_PATH)
         logger.info(f"Test dataset size: {len(self.test_dataset)}")
-        # TODO add num_workers
         self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
 
+    def _load_model(self, model_path: str = None) -> None:
+        """
+        Load model and weights.
+
+        :param model_path: path to file with model weights.
+        """
+        # load model architecture with pretrained weights
+        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
+        # ============================================================================================================
+        # change first conv layer of backbone nn (ResNet50) for grayscale images
+        # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
+        self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # ============================================================================================================
+        # change the last layer output classes
+        self.model.classifier[-1] = torch.nn.Conv2d(256, self.classes_count, 1)
+        logger.info(f"Model: {self.model.__class__.__name__}")
+
+        # load custom weights
+        if model_path is not None:
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"File {model_path} does not exists!")
+            self.model.load_state_dict(torch.load(model_path, weights_only=True))
+            logger.info(f"Loaded model weights from {model_path}")
+
+        self.model.to(config.model.DEVICE)
+
     def _train_loop(self, optimizer, loss_fn) -> None:
+        """
+        Train and evaluate model on config.model.EPOCH_COUNT epochs.
+
+        :param optimizer: model optimiser.
+        :param loss_fn: loss function.
+        """
         best_loss = float("inf")
         patience = config.model.PATIENCE
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
@@ -118,6 +143,6 @@ class MicroTextureDetector:
         avg_val_loss = running_cum_loss / len(self.val_dataset)
         avg_metrics_per_class = metrics / batch_count
         avg_metrics = torch.mean(avg_metrics_per_class, 1)
-        # logger.info(f"Avg metrics per class: {avg_metrics_per_class}")
+        # logger.info(f"Avg metrics per class: {avg_metrics_per_class}")  # TODO
         logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
         return avg_val_loss
