@@ -48,8 +48,12 @@ class SandGrainsDataset(Dataset):
             mask = config.data.MASK_TRAIN_TRANSFORMATION(image=mask)["image"]  # resize
             masks.append(mask)
         # convert masks into tensor
+        if config.data.USE_ORIGINAL_SHAPE:
+            size = (self.info["classes_count"], config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH)
+        else:
+            size = (self.info["classes_count"], config.data.IMAGE_RESIZED, config.data.IMAGE_RESIZED)
         tensor_masks = torch.zeros(
-            size=(self.info["classes_count"], config.data.IMAGE_RESIZED, config.data.IMAGE_RESIZED),
+            size=size,
             dtype=torch.uint8
         )
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
