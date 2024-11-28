@@ -1,7 +1,9 @@
-import torch
-from torch import nn
-import torch.nn.functional as F
 import logging
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+
 from configs.config import config
 
 logger = logging.getLogger(__name__)
