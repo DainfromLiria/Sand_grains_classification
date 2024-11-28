@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import random
 import shutil
@@ -9,10 +10,8 @@ import cv2
 import numpy as np
 from pycocotools.coco import COCO
 from tqdm import tqdm
-import logging
 
 from configs import config
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +31,10 @@ class Augmentation:
         """Main public function of this class."""
         img_ids = self._coco.getImgIds()
         t_begin = time.monotonic()
-        i = 0 # TODO remove it
         for img_id in tqdm(img_ids, desc="Augmentation"):
             image, masks, category_ids = self._load(img_id)
             transformed_data = self._apply_augmentations(image=image, masks=masks)
             self._save(transformed_data=transformed_data, category_ids=category_ids)
-            # TODO remove it
-            # =======================================================================================================
-            if i >= 2:
-                break
-            else:
-                i += 1
-            # =======================================================================================================
         t_end = time.monotonic()
         self.train_test_split()
         self._create_dataset_info()
