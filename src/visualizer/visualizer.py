@@ -1,9 +1,13 @@
-import os
 import json
-import seaborn as sns
+import os
+from typing import List
+
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List
+import seaborn as sns
+from tqdm import tqdm
+
+from configs import config
 
 
 class Visualizer:
@@ -54,9 +58,9 @@ class Visualizer:
         self.iou = data['iou']
         self.recall = data['recall']
         self.precision = data['precision']
-        self.iou_per_class = data['iou_per_class']
-        self.recall_per_class = data['recall_per_class']
-        self.precision_per_class = data['precision_per_class']
+        self.iou_per_class = np.array(data['iou_per_class'])
+        self.recall_per_class = np.array(data['recall_per_class'])
+        self.precision_per_class = np.array(data['precision_per_class'])
 
     def _create_loss_line_plots(self, viz_path: str):
         assert len(self.train_loss) == len(self.validation_loss)
@@ -99,3 +103,24 @@ class Visualizer:
         plt.title("IOU, Recall and Precision per Epoch")
         plt.legend()
         plt.savefig(os.path.join(viz_path, "avg_metrics.png"))
+
+    def create_per_class_metrics_visualizations(self, results_folder_path: str) -> None:
+        self.load_data(results_folder_path=results_folder_path)
+        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
+            classes_description_origin = json.load(file)["classes"]
+            classes_description = {v: k for k, v in classes_description_origin.items()}
+        classes_count = len(classes_description)
+        epochs = list(range(len(self.iou_per_class)))
+        viz_path = os.path.join(results_folder_path, "visualizations")
+
+        for i in tqdm(range(classes_count), desc="Create visualizations"):
+            plt.figure(figsize=(10, 8))
+            sns.lineplot(x=epochs, y=self.iou_per_class[:, i], label="IOU")
+            sns.lineplot(x=epochs, y=self.recall_per_class[:, i], label="Recall")
+            sns.lineplot(x=epochs, y=self.precision_per_class[:, i], label="Precision")
+            # plt.xticks(epochs)
+            plt.xlabel("Epoch")
+            plt.ylabel("Metric Value")
+            plt.title(f"{classes_description[i]}")
+            plt.legend()
+            plt.savefig(os.path.join(viz_path, f"{classes_description[i]}.png"))
