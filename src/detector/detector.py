@@ -5,12 +5,13 @@ from typing import Tuple
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
+from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
+                                             deeplabv3_resnet50)
 from tqdm import tqdm
 
 from configs import config
-from metrics import FocalLoss, calculate_metrics
 from dataset import SandGrainsDataset
+from metrics import FocalLoss, calculate_metrics
 from visualizer import Visualizer
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class MicroTextureDetector:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
         loss_fn = FocalLoss()
         folder_name = (f"{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
-                       f"_batches_{config.model.LEARNING_RATE}_lr")
+                       f"_batches_{config.model.LEARNING_RATE}_lr_without_normalization_without_resize")
         if not os.path.exists(config.model.RESULTS_DIR):
             os.mkdir(config.model.RESULTS_DIR)
         results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
@@ -49,6 +50,7 @@ class MicroTextureDetector:
         logger.info(f"Val dataset size: {len(self.val_dataset)}")
         self.test_dataset = SandGrainsDataset(path=config.data.AUG_TEST_SET_PATH)
         logger.info(f"Test dataset size: {len(self.test_dataset)}")
+        logger.info(f"Batch size: {config.model.BATCH_SIZE}")
         self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
@@ -161,3 +163,42 @@ class MicroTextureDetector:
         self.visualizer.store_metrics(avg_metrics.numpy(), avg_metrics_per_class.numpy())
         self.visualizer.validation_loss.append(avg_val_loss)
         return avg_val_loss
+
+    def evaluate_test_data(self, results_folder_path: str) -> None:
+        self.model.eval()  # set model in evaluation mode.
+        metrics = torch.zeros((3, self.classes_count))  # TODO add constant to metric count
+        batch_count = 0
+        make_image_viz = True
+        for images, masks in self.test_loader:
+            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+            with torch.no_grad():
+                outputs = self.model(images)['out']
+            metrics += calculate_metrics(outputs, masks).to("cpu")
+            # ==================================================================================
+            # create visualization on one test image
+            if make_image_viz:
+                outputs = torch.sigmoid(outputs)
+                outputs = (outputs >= 0.5).type(torch.uint8)
+                if config.data.USE_NORMALIZATION:
+                    logger.warning(f"Image doesn't denormalize for visualization.")
+                    mean = torch.tensor([0.485]) * 255
+                    std = torch.tensor([0.229]) * 255
+                    images[0] = (images[0].cpu() * std) + mean
+                    logger.info("Image has been denormalized.")
+                if (images[0] < 0).any() and config.data.USE_NORMALIZATION is False:
+                    logger.warning(f"Image wasn't denormalize for visualization or denormalization was wrong.")
+                self.visualizer.make_test_image_prediction_visualisations(
+                    images[0], masks[0], outputs[0], results_folder_path
+                )
+                make_image_viz = False
+            break
+            # ==================================================================================
+            batch_count += 1
+        # calculate metrics
+        avg_metrics_per_class = metrics / batch_count
+        avg_metrics = torch.mean(avg_metrics_per_class, 1)
+        logger.info(f"[TEST] IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
+
+    def predict(self, img_path) -> None:
+        pass
