@@ -167,3 +167,15 @@ class Visualizer:
                 concatenated = np.hstack((result1, result2))
                 img_path = os.path.join(img_folder, f"{self.classes_description[i]}_duo.png")
                 cv2.imwrite(img_path, concatenated)
+
+    def make_prediction_visualisation(self, image: torch.Tensor, pred: np.ndarray, out_folder_path: str) -> None:
+        classes_count = len(self.classes_description)
+        image_rgb = cv2.cvtColor(torch.squeeze(image).cpu().numpy(), cv2.COLOR_GRAY2RGB)
+        for i in range(classes_count):
+            pred_rgb = np.stack((pred[i],) * 3, axis=-1)
+            if len(np.unique(pred_rgb)) > 1:
+                masked_img = np.copy(image_rgb)
+                masked_img[(pred_rgb == 1.0).all(-1)] = [0, 255, 0]
+                result = cv2.addWeighted(masked_img, 0.3, image_rgb, 0.7, 0, masked_img)
+                img_path = os.path.join(out_folder_path, f"{self.classes_description[i]}.png")
+                cv2.imwrite(img_path, result)

@@ -1,5 +1,7 @@
 import logging
-import os.path
+import os
+import cv2
+import numpy as np
 from typing import Tuple
 
 import torch
@@ -181,7 +183,6 @@ class MicroTextureDetector:
                 outputs = torch.sigmoid(outputs)
                 outputs = (outputs >= 0.5).type(torch.uint8)
                 if config.data.USE_NORMALIZATION:
-                    logger.warning(f"Image doesn't denormalize for visualization.")
                     mean = torch.tensor([0.485]) * 255
                     std = torch.tensor([0.229]) * 255
                     images[0] = (images[0].cpu() * std) + mean
@@ -192,7 +193,6 @@ class MicroTextureDetector:
                     images[0], masks[0], outputs[0], results_folder_path
                 )
                 make_image_viz = False
-            break
             # ==================================================================================
             batch_count += 1
         # calculate metrics
@@ -200,5 +200,34 @@ class MicroTextureDetector:
         avg_metrics = torch.mean(avg_metrics_per_class, 1)
         logger.info(f"[TEST] IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
 
-    def predict(self, img_path) -> None:
-        pass
+    def predict(self, img_name: str) -> None:
+        self.model.eval()
+        img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"File with name {img_name} does not found.")
+
+        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        image = config.data.IMAGE_TRAIN_TRANSFORMATION(image=image)["image"]  # TODO make it optional
+        image = image.float().to(config.model.DEVICE).unsqueeze(0)
+        img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
+        if not os.path.exists(img_predictions_folder_path):
+            os.mkdir(img_predictions_folder_path)
+
+        with torch.no_grad():
+            logger.info(f"Image for model shape: {image.shape}")
+            result = self.model(image)['out']
+            result = torch.sigmoid(result)
+            result = (result >= 0.5).type(torch.uint8)
+            print(f"Result shape: {result.shape}")
+
+        if config.data.USE_NORMALIZATION:
+            mean = torch.tensor([0.485]) * 255
+            std = torch.tensor([0.229]) * 255
+            image[0] = (image[0].cpu() * std) + mean
+            logger.info("Image has been denormalized.")
+        if (image[0] < 0).any() and config.data.USE_NORMALIZATION is False:
+            logger.warning(f"Image wasn't denormalize for visualization or denormalization was wrong.")
+
+        self.visualizer.make_prediction_visualisation(
+            image=image[0], pred=result[0].cpu().numpy(), out_folder_path=img_predictions_folder_path
+        )
