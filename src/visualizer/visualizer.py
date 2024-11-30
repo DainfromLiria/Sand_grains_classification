@@ -1,10 +1,12 @@
 import json
 import os
-from typing import List
+from typing import Dict, List
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import torch
 from tqdm import tqdm
 
 from configs import config
@@ -23,6 +25,11 @@ class Visualizer:
         self.iou_per_class: List[List[float]] = []
         self.recall_per_class: List[List[float]] = []
         self.precision_per_class: List[List[float]] = []
+
+        # read classes descriptions
+        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
+            classes_description_origin = json.load(file)["classes"]
+            self.classes_description: Dict[int, str] = {v: k for k, v in classes_description_origin.items()}
 
     def visualize(self, results_folder_path: str):
         viz_path = os.path.join(results_folder_path, "visualizations")
@@ -71,7 +78,6 @@ class Visualizer:
         sns.lineplot(x=epochs, y=self.train_loss, label="Train Loss")
         sns.lineplot(x=epochs, y=self.validation_loss, label="Validation Loss")
 
-        plt.xticks(epochs)
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title("Train and Validation Loss per Epoch")
@@ -106,12 +112,9 @@ class Visualizer:
 
     def create_per_class_metrics_visualizations(self, results_folder_path: str) -> None:
         self.load_data(results_folder_path=results_folder_path)
-        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
-            classes_description_origin = json.load(file)["classes"]
-            classes_description = {v: k for k, v in classes_description_origin.items()}
-        classes_count = len(classes_description)
         epochs = list(range(len(self.iou_per_class)))
         viz_path = os.path.join(results_folder_path, "visualizations")
+        classes_count = len(self.classes_description)
 
         for i in tqdm(range(classes_count), desc="Create visualizations"):
             plt.figure(figsize=(10, 8))
@@ -121,6 +124,49 @@ class Visualizer:
             # plt.xticks(epochs)
             plt.xlabel("Epoch")
             plt.ylabel("Metric Value")
-            plt.title(f"{classes_description[i]}")
+            plt.title(f"{self.classes_description[i]}")
             plt.legend()
-            plt.savefig(os.path.join(viz_path, f"{classes_description[i]}.png"))
+            plt.savefig(os.path.join(viz_path, f"{self.classes_description[i]}.png"))
+
+    def make_test_image_prediction_visualisations(
+            self,
+            image: torch.Tensor,
+            masks: torch.Tensor,
+            outputs: torch.Tensor,
+            results_folder_path: str
+
+    ) -> None:
+        image_rgb = cv2.cvtColor(torch.squeeze(image).cpu().numpy(), cv2.COLOR_GRAY2RGB)
+        classes_count = len(self.classes_description)
+
+        viz_folder = os.path.join(results_folder_path, "visualizations")
+        if not os.path.exists(viz_folder):
+            os.mkdir(viz_folder)
+        img_folder = os.path.join(viz_folder, "images")
+        if not os.path.exists(img_folder):
+            os.mkdir(img_folder)
+
+        for i in range(classes_count):
+            print(f"{i}: {self.classes_description[i]}")
+            mask_rgb = np.stack((masks[i].cpu().numpy(),) * 3, axis=-1)
+            output_rgb = np.stack((outputs[i].cpu().numpy(),) * 3, axis=-1)
+            print(f"Mask RGB: {mask_rgb.dtype}  Output: {output_rgb.dtype}")
+            if len(np.unique(mask_rgb)) > 1 or len(np.unique(output_rgb)) > 1:
+                print(f"Mask: {np.unique(mask_rgb)} Output: {np.unique(output_rgb)}")
+                # show on one frame
+                masked_img = np.copy(image_rgb)
+                masked_img[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
+                masked_img[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
+                result = cv2.addWeighted(masked_img, 0.3, image_rgb, 0.7, 0, masked_img)
+                img_path = os.path.join(img_folder, f"{self.classes_description[i]}.png")
+                cv2.imwrite(img_path, result)
+                # show on two separate frames
+                masked_img_duo1 = np.copy(image_rgb)
+                masked_img_duo2 = np.copy(image_rgb)
+                masked_img_duo1[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
+                result1 = cv2.addWeighted(masked_img_duo1, 0.3, image_rgb, 0.7, 0, masked_img_duo1)
+                masked_img_duo2[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
+                result2 = cv2.addWeighted(masked_img_duo2, 0.3, image_rgb, 0.7, 0, masked_img_duo2)
+                concatenated = np.hstack((result1, result2))
+                img_path = os.path.join(img_folder, f"{self.classes_description[i]}_duo.png")
+                cv2.imwrite(img_path, concatenated)
