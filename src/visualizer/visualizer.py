@@ -147,12 +147,9 @@ class Visualizer:
             os.mkdir(img_folder)
 
         for i in range(classes_count):
-            print(f"{i}: {self.classes_description[i]}")
             mask_rgb = np.stack((masks[i].cpu().numpy(),) * 3, axis=-1)
             output_rgb = np.stack((outputs[i].cpu().numpy(),) * 3, axis=-1)
-            print(f"Mask RGB: {mask_rgb.dtype}  Output: {output_rgb.dtype}")
             if len(np.unique(mask_rgb)) > 1 or len(np.unique(output_rgb)) > 1:
-                print(f"Mask: {np.unique(mask_rgb)} Output: {np.unique(output_rgb)}")
                 # show on one frame
                 masked_img = np.copy(image_rgb)
                 masked_img[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
