@@ -103,7 +103,6 @@ class Visualizer:
         sns.lineplot(x=epochs, y=self.recall, label="Recall")
         sns.lineplot(x=epochs, y=self.precision, label="Precision")
 
-        plt.xticks(epochs)
         plt.xlabel("Epoch")
         plt.ylabel("Metric Value")
         plt.title("IOU, Recall and Precision per Epoch")
@@ -121,7 +120,7 @@ class Visualizer:
             sns.lineplot(x=epochs, y=self.iou_per_class[:, i], label="IOU")
             sns.lineplot(x=epochs, y=self.recall_per_class[:, i], label="Recall")
             sns.lineplot(x=epochs, y=self.precision_per_class[:, i], label="Precision")
-            # plt.xticks(epochs)
+
             plt.xlabel("Epoch")
             plt.ylabel("Metric Value")
             plt.title(f"{self.classes_description[i]}")
