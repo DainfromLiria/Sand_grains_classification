@@ -35,8 +35,10 @@ class DataConfig:
     ])
 
     # for DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1
+    USE_ORIGINAL_SHAPE: bool = False
+    USE_NORMALIZATION: bool = False
     IMAGE_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
-        A.Normalize(),
+        # A.Normalize(),
         A.Resize(height=520, width=520),
         ToTensorV2()
     ])
@@ -44,21 +46,28 @@ class DataConfig:
         A.Resize(height=520, width=520)
     ])
 
+    PREDICTIONS_FOLDER_PATH: str = "../predictions"
+
 
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
     DEVICE: str = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     BATCH_SIZE: int = 12
-    LEARNING_RATE: float = 1e-3  # TODO maybe use default lr
-    EPOCH_COUNT: int = 5  # TODO increase to ~100
+    LEARNING_RATE: float = 1e-4  # TODO maybe use default lr
+    EPOCH_COUNT: int = 300  # TODO increase to ~100
 
     # Focal Loss configs
-    GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
+    F_GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
+
+    # Focal Tversky Loss configs. All values were best in original paper.
+    FT_GAMMA: float = 0.75  # 1 / (4/3) => 3/4 => 0.75
+    FT_ALPHA: float = 0.7
+    FT_BETA: float = 0.3
 
     # Early stopping config
-    PATIENCE: int = 50
-    BEST_MODEL_PATH: str = "../models/best_model.pt"
+    PATIENCE: int = 70
+    RESULTS_DIR: str = "../results"
 
 
 @dataclass
