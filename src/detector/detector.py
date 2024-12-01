@@ -13,7 +13,8 @@ from tqdm import tqdm
 
 from configs import config
 from dataset import SandGrainsDataset
-from metrics import FocalLoss, calculate_metrics
+from metrics import calculate_metrics, convert_nn_output
+from metrics.loss import FocalLoss, FocalTverskyLoss
 from visualizer import Visualizer
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,10 @@ class MicroTextureDetector:
 
     def train(self) -> None:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
-        loss_fn = FocalLoss()
+        # loss_fn = FocalLoss()
+        loss_fn = FocalTverskyLoss()
         folder_name = (f"{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
-                       f"_batches_{config.model.LEARNING_RATE}_lr_without_normalization_without_resize")
+                       f"_batches_{config.model.LEARNING_RATE}_lr_without_normalization")
         if not os.path.exists(config.model.RESULTS_DIR):
             os.mkdir(config.model.RESULTS_DIR)
         results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
@@ -180,8 +182,7 @@ class MicroTextureDetector:
             # ==================================================================================
             # create visualization on one test image
             if make_image_viz:
-                outputs = torch.sigmoid(outputs)
-                outputs = (outputs >= 0.5).type(torch.uint8)
+                outputs = convert_nn_output(outputs=outputs, to_mask=True).type(torch.uint8)
                 if config.data.USE_NORMALIZATION:
                     mean = torch.tensor([0.485]) * 255
                     std = torch.tensor([0.229]) * 255
@@ -216,8 +217,7 @@ class MicroTextureDetector:
         with torch.no_grad():
             logger.info(f"Image for model shape: {image.shape}")
             result = self.model(image)['out']
-            result = torch.sigmoid(result)
-            result = (result >= 0.5).type(torch.uint8)
+            result = convert_nn_output(outputs=result, to_mask=True).type(torch.uint8)
             print(f"Result shape: {result.shape}")
 
         if config.data.USE_NORMALIZATION:
