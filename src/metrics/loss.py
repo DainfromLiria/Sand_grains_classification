@@ -5,7 +5,6 @@ import torch.nn.functional as F
 from torch import nn
 
 from configs.config import config
-from metrics import convert_nn_output
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ class FocalLoss(nn.Module):
 
         :return: mean alpha weighted focal loss for batch.
         """
-        outputs = convert_nn_output(outputs=outputs, to_mask=False)
+        outputs = torch.sigmoid(outputs)
 
         outputs = outputs.flatten()
         targets = targets.flatten()
@@ -65,7 +64,10 @@ class FocalTverskyLoss(nn.Module):
 
     def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         eps = 1e-6  # for situations when mask and target contains only zeros
-        outputs = convert_nn_output(outputs=outputs, to_mask=False)
+        outputs = torch.sigmoid(outputs)
+
+        outputs = outputs.flatten()
+        targets = targets.flatten()
 
         # ==========================================================================================================
         # https://github.com/Project-MONAI/MONAI/blob/46a5272196a6c2590ca2589029eed8e4d56ff008/monai/losses/tversky.py
