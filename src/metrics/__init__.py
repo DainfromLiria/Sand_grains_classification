@@ -1,1 +1,1 @@
-from .metrics import calculate_metrics, convert_nn_output, confusion_matrix
+from .metrics import calculate_metrics, confusion_matrix
