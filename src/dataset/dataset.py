@@ -62,5 +62,5 @@ class SandGrainsDataset(Dataset):
 
     def _read_info(self):
         """Read file with main information about dataset."""
-        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
+        with open(config.data.DATASET_INFO_PATH, "r") as file:
             self.info = json.load(file)
