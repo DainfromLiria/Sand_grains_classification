@@ -25,13 +25,14 @@ class FocalLoss(nn.Module):
         """
         outputs = torch.sigmoid(outputs)
 
-        outputs = outputs.flatten()
-        targets = targets.flatten()
+        outputs = outputs.view(outputs.size(1), -1)
+        targets = targets.view(targets.size(1), -1)
         alpha = self._get_alpha(targets)
         bce_loss = F.binary_cross_entropy(weight=alpha, input=outputs, target=targets, reduction='none')  # -log(pt)
         pt = torch.exp(-bce_loss)
         focal_loss_per_pixel = (torch.tensor(1) - pt)**config.model.F_GAMMA * bce_loss
-        return torch.mean(focal_loss_per_pixel)
+        mean_loss_per_class = torch.mean(focal_loss_per_pixel, dim=1)
+        return torch.mean(mean_loss_per_class)
 
     @staticmethod
     def _get_alpha(targets: torch.Tensor) -> torch.Tensor:
@@ -43,12 +44,15 @@ class FocalLoss(nn.Module):
 
         :return: Inverse-Frequency Class Weights (alphas)
         """
-        assert targets.dim() == 1  # check if value is vector
+        # assert targets.dim() == 1  # check if value is vector
         try:
-            N = len(targets)
-            _, p = torch.unique(targets, return_counts=True)
-            w0 = N / (2 * p[0])
-            w1 = N / (2 * p[1])
+            N = len(targets.flatten())
+            num_classes = targets.shape[0]
+            # _, p = torch.unique(targets, return_counts=True)
+            p0 = torch.sum(targets == 0, dim=1)
+            p1 = torch.sum(targets == 1, dim=1)
+            w0 = (N / (num_classes * p0)).unsqueeze(1).expand_as(targets)
+            w1 = (N / (num_classes * p1)).unsqueeze(1).expand_as(targets)
             alpha = torch.where(targets == 0, w0, w1)
             return alpha
         except Exception as e:
