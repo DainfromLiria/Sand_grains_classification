@@ -1,2 +1,2 @@
-from .augmentation import Augmentation
+from .datasetcreator import DatasetCreator
 from .dataset import SandGrainsDataset
