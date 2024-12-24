@@ -27,7 +27,7 @@ class Visualizer:
         self.precision_per_class: List[List[float]] = []
 
         # read classes descriptions
-        with open(config.data.AUG_DATASET_INFO_PATH, "r") as file:
+        with open(config.data.DATASET_INFO_PATH, "r") as file:
             classes_description_origin = json.load(file)["classes"]
             self.classes_description: Dict[int, str] = {v: k for k, v in classes_description_origin.items()}
 
