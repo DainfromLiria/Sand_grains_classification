@@ -70,9 +70,6 @@ class FocalTverskyLoss(nn.Module):
         eps = 1e-6  # for situations when mask and target contains only zeros
         outputs = torch.sigmoid(outputs)
 
-        outputs = outputs.flatten()
-        targets = targets.flatten()
-
         # ==========================================================================================================
         # https://github.com/Project-MONAI/MONAI/blob/46a5272196a6c2590ca2589029eed8e4d56ff008/monai/losses/tversky.py
         tp = torch.sum(outputs * targets, dim=0)
