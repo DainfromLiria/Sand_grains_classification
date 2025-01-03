@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 
 import albumentations as A
-import cv2
 import torch
 from albumentations.pytorch import ToTensorV2
 
@@ -14,11 +13,11 @@ class DataConfig:
     IMAGE_HEIGHT: int = 960
     IMAGE_RESIZED: int = 520
 
-    AUG_DATASET_PATH: str = "../aug_data"
-    AUG_DATASET_INFO_PATH: str = "../aug_data/info.json"
-    AUG_TRAIN_SET_PATH: str = "../aug_data/train"
-    AUG_VAL_SET_PATH: str = "../aug_data/val"
-    AUG_TEST_SET_PATH: str = "../aug_data/test"
+    DATASET_PATH: str = "../aug_data"
+    DATASET_INFO_PATH: str = "../aug_data/info.json"
+    TRAIN_SET_PATH: str = "../aug_data/train"
+    VAL_SET_PATH: str = "../aug_data/val"
+    TEST_SET_PATH: str = "../aug_data/test"
 
     TRAIN_SIZE: float = 0.8
     VAL_SIZE: float = 0.10
@@ -35,15 +34,16 @@ class DataConfig:
     ])
 
     # for DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1
-    USE_ORIGINAL_SHAPE: bool = False
+    USE_ORIGINAL_SHAPE: bool = True
     USE_NORMALIZATION: bool = False
     IMAGE_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
-        # A.Normalize(),
-        A.Resize(height=520, width=520),
+        # A.CLAHE()
+        # A.Normalize(mean=68.451, std=32.061),
+        # A.Resize(height=520, width=520),
         ToTensorV2()
     ])
     MASK_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
-        A.Resize(height=520, width=520)
+        # A.Resize(height=520, width=520)
     ])
 
     PREDICTIONS_FOLDER_PATH: str = "../predictions"
@@ -52,10 +52,10 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     MODELS_DIR_PATH: str = "../models"
-    DEVICE: str = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    BATCH_SIZE: int = 12
-    LEARNING_RATE: float = 1e-4  # TODO maybe use default lr
-    EPOCH_COUNT: int = 300  # TODO increase to ~100
+    DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    BATCH_SIZE: int = 5
+    LEARNING_RATE: float = 1e-6
+    EPOCH_COUNT: int = 300
 
     # Focal Loss configs
     F_GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
