@@ -40,24 +40,20 @@ class FocalLoss(nn.Module):
         Calculate Inverse-Frequency Class Weights, that will be used as alphas (weights) in cross entropy
         loss calculation.
 
-        :param targets: input 1-dim tensor of targets with values 0 or 1.
+        :param targets: input tensor of targets with values 0 or 1.
 
         :return: Inverse-Frequency Class Weights (alphas)
         """
-        # assert targets.dim() == 1  # check if value is vector
-        try:
-            N = len(targets.flatten())
-            num_classes = targets.shape[0]
-            # _, p = torch.unique(targets, return_counts=True)
-            p0 = torch.sum(targets == 0, dim=1)
-            p1 = torch.sum(targets == 1, dim=1)
-            w0 = (N / (num_classes * p0)).unsqueeze(1).expand_as(targets)
-            w1 = (N / (num_classes * p1)).unsqueeze(1).expand_as(targets)
-            alpha = torch.where(targets == 0, w0, w1)
-            return alpha
-        except Exception as e:
-            logger.error(f"{e}")  # in case if all mask contains only 0 or 1
-            raise e
+        eps = 1e-6  # for situations when mask and target contains only zeros
+        N = len(targets.flatten())
+        num_classes = targets.shape[0]
+
+        p0 = torch.sum(targets == 0, dim=1)
+        p1 = torch.sum(targets == 1, dim=1)
+        w0 = (N + eps / (num_classes * p0) + eps).unsqueeze(1).expand_as(targets)
+        w1 = (N + eps / (num_classes * p1) + eps).unsqueeze(1).expand_as(targets)
+        alpha = torch.where(targets == 0, w0, w1)
+        return alpha
 # ====================================================================================================================
 
 
