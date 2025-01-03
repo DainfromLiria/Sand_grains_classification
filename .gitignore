@@ -1,4 +1,6 @@
 /aug_data/
 /.idea/
 /.sand_grains/
-!/models/checkpoints/deeplabv3_resnet101_coco-586e9e4e.pth
+/models/
+/results/
+/predictions/
