@@ -3,19 +3,25 @@ import os
 import cv2
 import numpy as np
 from typing import Tuple
+import segmentation_models_pytorch as smp
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
-                                             deeplabv3_resnet50)
+from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights, DeepLabV3_ResNet101_Weights,
+                                             deeplabv3_resnet50, deeplabv3_resnet101)
 from tqdm import tqdm
 
 from configs import config
 from dataset import SandGrainsDataset
-from metrics import calculate_metrics, convert_nn_output
+from metrics import calculate_metrics
 from metrics.loss import FocalLoss, FocalTverskyLoss
 from visualizer import Visualizer
+
+import ssl
+import urllib.request
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +37,14 @@ class MicroTextureDetector:
 
     def train(self) -> None:
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
-        # loss_fn = FocalLoss()
-        loss_fn = FocalTverskyLoss()
-        folder_name = (f"{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
-                       f"_batches_{config.model.LEARNING_RATE}_lr_without_normalization")
+        loss_fn = FocalLoss()
+        # loss_fn = FocalTverskyLoss()
+        # folder_name = (f"{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
+        #                f"_batches_{config.model.LEARNING_RATE}"
+        #                f"_lr_without_normalization_with_resize_MULTILABELED_aug_only_train_resnet50_only_two_in_alpha")
+        folder_name = (f"DeepLabv3+_{loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs_{config.model.BATCH_SIZE}"
+                       f"_batches_{config.model.LEARNING_RATE}"
+                       f"_lr_without_normalization_without_resize_MULTILABELED_aug_only_train_xception_only_two_in_alpha")
         if not os.path.exists(config.model.RESULTS_DIR):
             os.mkdir(config.model.RESULTS_DIR)
         results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
@@ -46,13 +56,13 @@ class MicroTextureDetector:
 
     def _load_data(self):
         """Load train, validation and test datasets and create DataLoaders."""
-        self.train_dataset = SandGrainsDataset(path=config.data.AUG_TRAIN_SET_PATH)
+        self.train_dataset = SandGrainsDataset(path=config.data.TRAIN_SET_PATH)
         self.classes_count = self.train_dataset.info["classes_count"]
         logger.info(f"Dataset classes count: {self.classes_count}")
         logger.info(f"Train dataset size: {len(self.train_dataset)}")
-        self.val_dataset = SandGrainsDataset(path=config.data.AUG_VAL_SET_PATH)
+        self.val_dataset = SandGrainsDataset(path=config.data.VAL_SET_PATH)
         logger.info(f"Val dataset size: {len(self.val_dataset)}")
-        self.test_dataset = SandGrainsDataset(path=config.data.AUG_TEST_SET_PATH)
+        self.test_dataset = SandGrainsDataset(path=config.data.TEST_SET_PATH)
         logger.info(f"Test dataset size: {len(self.test_dataset)}")
         logger.info(f"Batch size: {config.model.BATCH_SIZE}")
         self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
@@ -66,7 +76,14 @@ class MicroTextureDetector:
         :param model_path: path to file with model weights.
         """
         # load model architecture with pretrained weights
-        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
+        # self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
+        # self.model = deeplabv3_resnet101(weights=DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1)
+        self.model = smp.DeepLabV3Plus(
+            encoder_name="resnet50",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=19
+        )
         # ============================================================================================================
         # change first conv layer of backbone nn (ResNet50) for grayscale images
         # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
@@ -99,6 +116,9 @@ class MicroTextureDetector:
             train_loss = self._train_one_epoch(optimizer=optimizer, loss_fn=loss_fn)
             val_loss = self._validate_one_epoch(loss_fn=loss_fn)
             logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
+
+            if val_loss is torch.nan or train_loss is torch.nan:
+                raise Exception("Loss is nan!!!")
 
             # early stopping
             if val_loss < best_loss:
@@ -173,7 +193,7 @@ class MicroTextureDetector:
         metrics = torch.zeros((3, self.classes_count))  # TODO add constant to metric count
         batch_count = 0
         make_image_viz = True
-        for images, masks in self.test_loader:
+        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
@@ -182,7 +202,9 @@ class MicroTextureDetector:
             # ==================================================================================
             # create visualization on one test image
             if make_image_viz:
-                outputs = convert_nn_output(outputs=outputs, to_mask=True).type(torch.uint8)
+                # outputs = convert_nn_output(outputs=outputs, to_mask=True).type(torch.uint8)
+                outputs = torch.sigmoid(outputs)
+                outputs = (outputs > 0.85).type(torch.uint8)
                 if config.data.USE_NORMALIZATION:
                     mean = torch.tensor([0.485]) * 255
                     std = torch.tensor([0.229]) * 255
@@ -216,9 +238,10 @@ class MicroTextureDetector:
 
         with torch.no_grad():
             logger.info(f"Image for model shape: {image.shape}")
-            result = self.model(image)['out']
-            result = convert_nn_output(outputs=result, to_mask=True).type(torch.uint8)
-            print(f"Result shape: {result.shape}")
+            outputs = self.model(image)['out']
+            outputs = torch.sigmoid(outputs)
+            outputs = (outputs > 0.85).type(torch.uint8)
+            print(f"Result shape: {outputs.shape}")
 
         if config.data.USE_NORMALIZATION:
             mean = torch.tensor([0.485]) * 255
@@ -229,5 +252,24 @@ class MicroTextureDetector:
             logger.warning(f"Image wasn't denormalize for visualization or denormalization was wrong.")
 
         self.visualizer.make_prediction_visualisation(
-            image=image[0], pred=result[0].cpu().numpy(), out_folder_path=img_predictions_folder_path
+            image=image[0], pred=outputs[0].cpu().numpy(), out_folder_path=img_predictions_folder_path
         )
+
+    def calculate_normalization_std_mean(self):
+        """
+        Calculate mean and std on train data for normalization.
+        Calculation speed depends on the batch size.
+        """
+        mean = 0
+        std = 0
+        count = 0
+        for images, masks in tqdm(self.train_loader, desc="Calculating std and mean"):
+            images, _ = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+            std += torch.std(images)
+            mean += torch.mean(images)
+            count += 1
+        std = std / count
+        mean = mean / count
+        logger.info(f"Mean: {mean}, Std: {std}")
+
+
