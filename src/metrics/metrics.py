@@ -2,6 +2,9 @@ import logging
 
 import torch
 
+from utils import predict_morphological_feature
+from configs import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +34,10 @@ def confusion_matrix(outputs: torch.Tensor, targets: torch.Tensor):
 
 def calculate_metrics(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     eps = 1e-6  # for situations when mask and target contains only zeros
-    outputs = convert_nn_output(outputs=outputs, to_mask=True)  # convert probabilities into labels
+    # convert probabilities into labels
+    outputs = torch.sigmoid(outputs)
+    outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+    outputs = predict_morphological_feature(outputs)
 
     tp, fp, fn, tn = confusion_matrix(outputs=outputs, targets=targets)
 
@@ -40,24 +46,3 @@ def calculate_metrics(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
     iou_per_class = torch.squeeze((tp + eps) / (tp + fp + fn + eps))
 
     return torch.stack((iou_per_class, recall_per_class, precision_per_class))
-
-
-def convert_nn_output(outputs: torch.Tensor, to_mask: bool) -> torch.Tensor:
-    relief_idx = [4, 5, 12]
-    shape_idx = [6, 11, 14, 17]  # TODO hardcoded part, ideally must be dynamic.
-    other_idx = [0, 1, 2, 3, 7, 8, 9, 10, 13, 15, 16, 18]
-
-    outputs[:, other_idx] = torch.sigmoid(outputs[:, other_idx])
-    outputs[:, relief_idx] = torch.softmax(outputs[:, relief_idx], dim=1)
-    outputs[:, shape_idx] = torch.softmax(outputs[:, shape_idx], dim=1)
-    if to_mask:
-        # convert probabilities into labels
-        # =========================================================================================================
-        # https://discuss.pytorch.org/t/how-to-convert-argmax-result-to-an-one-hot-matrix/125508
-        relief_max_vals = torch.argmax(outputs[:, relief_idx], dim=1)
-        outputs[:, relief_idx] = torch.zeros_like(outputs[:, relief_idx]).scatter_(1, relief_max_vals.unsqueeze(1), 1.)
-        shape_max_vals = torch.argmax(outputs[:, shape_idx], dim=1)
-        outputs[:, shape_idx] = torch.zeros_like(outputs[:, shape_idx]).scatter_(1, shape_max_vals.unsqueeze(1), 1.)
-        # =========================================================================================================
-        outputs[:, other_idx] = (outputs[:, other_idx] > 0.5).float()
-    return outputs
