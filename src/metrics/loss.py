@@ -44,14 +44,14 @@ class FocalLoss(nn.Module):
 
         :return: Inverse-Frequency Class Weights (alphas)
         """
-        eps = 1e-6  # for situations when mask and target contains only zeros
+        eps = 1e-6  # for numerical stability
         N = len(targets.flatten())
         num_classes = targets.shape[0]
 
         p0 = torch.sum(targets == 0, dim=1)
         p1 = torch.sum(targets == 1, dim=1)
-        w0 = (N + eps / (num_classes * p0) + eps).unsqueeze(1).expand_as(targets)
-        w1 = (N + eps / (num_classes * p1) + eps).unsqueeze(1).expand_as(targets)
+        w0 = ((N + eps) / ((num_classes * p0) + eps)).unsqueeze(1).expand_as(targets)
+        w1 = ((N + eps) / ((num_classes * p1) + eps)).unsqueeze(1).expand_as(targets)
         alpha = torch.where(targets == 0, w0, w1)
         return alpha
 # ====================================================================================================================
