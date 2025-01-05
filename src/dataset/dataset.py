@@ -47,15 +47,9 @@ class SandGrainsDataset(Dataset):
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             mask = config.data.MASK_TRAIN_TRANSFORMATION(image=mask)["image"]  # resize
             masks.append(mask)
-        # convert masks into tensor
-        if config.data.USE_ORIGINAL_SHAPE:
-            size = (self.info["classes_count"], config.data.IMAGE_HEIGHT, config.data.IMAGE_WIDTH)
-        else:
-            size = (self.info["classes_count"], config.data.IMAGE_RESIZED, config.data.IMAGE_RESIZED)
-        tensor_masks = torch.zeros(
-            size=size,
-            dtype=torch.uint8
-        )
+        # convert and join masks into tensor
+        size = (self.info["classes_count"], masks[0].shape[0], masks[0].shape[1])
+        tensor_masks = torch.zeros(size=size, dtype=torch.uint8)
         for i, c_idx in enumerate(self.info["categories"][str(real_idx)]):
             tensor_masks[c_idx, :, :] = tensor_masks[c_idx, :, :] | torch.tensor(masks[i], dtype=torch.uint8)
         return image, tensor_masks
