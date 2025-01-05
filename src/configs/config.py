@@ -12,6 +12,10 @@ class DataConfig:
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
     IMAGE_RESIZED: int = 520
+    MAX_PIXEL_VALUE: int = 255
+
+    RELIEF_IDX = [4, 5, 12]
+    SHAPE_IDX = [6, 11, 14, 17]
 
     DATASET_PATH: str = "../aug_data"
     DATASET_INFO_PATH: str = "../aug_data/info.json"
@@ -33,17 +37,23 @@ class DataConfig:
         A.ShiftScaleRotate(p=1.0)  # use it instead of Rotate because it can make rotate, translate or scale
     ])
 
-    # for DeepLabV3_ResNet101_Weights.COCO_WITH_VOC_LABELS_V1
-    USE_ORIGINAL_SHAPE: bool = True
-    USE_NORMALIZATION: bool = False
+    NORMALIZATION_MEAN: float = 68.451
+    NORMALIZATION_STD: float = 32.061
     IMAGE_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
         # A.CLAHE()
-        # A.Normalize(mean=68.451, std=32.061),
+        A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
         # A.Resize(height=520, width=520),
         ToTensorV2()
     ])
     MASK_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
         # A.Resize(height=520, width=520)
+    ])
+    # ===============================================================================================================
+    IMAGE_PREDICTION_TRANSFORMATION: A.Compose = A.Compose([
+        # A.CLAHE()
+        # A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
+        # A.Resize(height=520, width=520),
+        ToTensorV2()
     ])
 
     PREDICTIONS_FOLDER_PATH: str = "../predictions"
@@ -56,6 +66,7 @@ class ModelConfig:
     BATCH_SIZE: int = 5
     LEARNING_RATE: float = 1e-6
     EPOCH_COUNT: int = 300
+    THRESHOLD: float = 0.85
 
     # Focal Loss configs
     F_GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
