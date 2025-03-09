@@ -5,7 +5,6 @@ import random
 from typing import Any, Dict, List, Tuple
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pycocotools.coco import COCO
@@ -17,8 +16,9 @@ logger = logging.getLogger(__name__)
 
 class DatasetCreator:
     """
-    This class read COCO dataset with original data, split it on train, validation and test, augment
-    train dataset and save it dataset in new format for training.
+    This class read COCO dataset with original data, split it on train and validation if dataset_info.json
+    not found and augment train dataset. Also, this class provide load() method that return images by
+    index for __getitem__ method of pytorch Dataset class.
     """
 
     def __init__(self, mode: str) -> None:
