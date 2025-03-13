@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import random
 from typing import Any, Dict, List, Tuple
 
@@ -9,6 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from pycocotools.coco import COCO
+from pathlib import Path
 
 from configs import config
 
@@ -29,8 +29,8 @@ class SandGrainsDataset(Dataset):
         :param mode: can be "train", "val" or "eval"
         """
         self.mode = mode
-        self.annot_path: str = config.data.TRAIN_ANNOTATIONS_PATH if self.mode in {"train", "val"} else config.data.EVAL_ANNOTATIONS_PATH
-        self.img_path: str = config.data.TRAIN_IMAGES_PATH if self.mode in {"train", "val"} else config.data.EVAL_IMAGES_PATH
+        self.annot_path: Path = config.paths.TRAIN_ANNOTATIONS if self.mode in {"train", "val"} else config.paths.EVAL_ANNOTATIONS
+        self.img_path: Path = config.paths.TRAIN_IMAGES_FOLDER if self.mode in {"train", "val"} else config.paths.EVAL_IMAGES_FOLDER
         self._coco: COCO = COCO(self.annot_path)
         self.dataset_info: Dict[str, Any] = {}
         if self.mode in {"train", "val"}:
@@ -43,13 +43,13 @@ class SandGrainsDataset(Dataset):
 
     def _load_dataset_info(self) -> None:
         """Load information about the training dataset."""
-        if not os.path.exists(path=config.data.TRAIN_DATASET_INFO_PATH):
+        if not config.paths.TRAIN_DATASET_INFO.exists():
             logger.warning("Original train dataset isn't split on train and validation. Splitting it now.")
             self._train_val_split()
-            with open(config.data.TRAIN_DATASET_INFO_PATH, "w") as f:
+            with open(config.paths.TRAIN_DATASET_INFO, "w") as f:
                 json.dump(self.dataset_info, f, indent=4)
 
-        with open(config.data.TRAIN_DATASET_INFO_PATH, "r", encoding="utf-8") as f:
+        with open(config.paths.TRAIN_DATASET_INFO, "r", encoding="utf-8") as f:
             self.dataset_info = json.load(f)
 
     def _train_val_split(self) -> None:
@@ -79,8 +79,8 @@ class SandGrainsDataset(Dataset):
         if self.mode in {"train", "val"}:
             coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][idx]
         # load image
-        image_path = os.path.join(self.img_path, self._coco.loadImgs(coco_id)[0]['file_name'])
-        image: np.ndarray = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        image_path: Path = self.img_path / Path(self._coco.loadImgs(coco_id)[0]['file_name'])
+        image: np.ndarray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
 
         # load annotations
         category_ids: List[int] = []
