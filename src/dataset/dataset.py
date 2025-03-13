@@ -92,6 +92,9 @@ class SandGrainsDataset(Dataset):
             mask = self._coco.annToMask(ann)
             masks.append(mask)
 
+        # apply image preprocessing transformations
+        image: torch.Tensor = config.data.IMAGE_TRAIN_TRANSFORMATIONS(image=image)["image"]
+
         # apply augmentations
         if self.mode == "train":
             aug = config.data.AUGMENTATIONS(image=image, masks=masks)
@@ -103,6 +106,7 @@ class SandGrainsDataset(Dataset):
         for i, c_idx in enumerate(category_ids):
             tensor_masks[c_idx, :, :] = tensor_masks[c_idx, :, :] | torch.tensor(masks[i], dtype=torch.uint8)
 
-        # apply final image transformations
-        image: torch.Tensor = config.data.IMAGE_TRAIN_TRANSFORMATIONS(image=image)["image"]
+        # convert image to torch.Tensor
+        image: np.ndarray = np.expand_dims(image, 2) # for grayscale (mono channel image)
+        image: torch.Tensor = torch.from_numpy(image.transpose(2, 0, 1))
         return image, tensor_masks
