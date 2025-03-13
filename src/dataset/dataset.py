@@ -1,14 +1,14 @@
 import json
 import logging
 import random
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 from pycocotools.coco import COCO
-from pathlib import Path
+from torch.utils.data import Dataset
 
 from configs import config
 
