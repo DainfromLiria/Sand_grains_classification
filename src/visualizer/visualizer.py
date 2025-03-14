@@ -1,7 +1,9 @@
 import json
+import logging
 import os
 from typing import Dict, List
 
+import albumentations as A
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +12,9 @@ import torch
 from tqdm import tqdm
 
 from configs import config
+from utils import predict_morphological_feature
+
+logger = logging.getLogger(__name__)
 
 
 class Visualizer:
@@ -26,10 +31,13 @@ class Visualizer:
         self.recall_per_class: List[List[float]] = []
         self.precision_per_class: List[List[float]] = []
 
+        self.test_img_idx: int = 0
+
         # read classes descriptions
         with open(config.data.DATASET_INFO_PATH, "r") as file:
             classes_description_origin = json.load(file)["classes"]
             self.classes_description: Dict[int, str] = {v: k for k, v in classes_description_origin.items()}
+        self.classes_count = len(self.classes_description)
 
     def visualize(self, results_folder_path: str):
         viz_path = os.path.join(results_folder_path, "visualizations")
@@ -127,54 +135,73 @@ class Visualizer:
             plt.legend()
             plt.savefig(os.path.join(viz_path, f"{self.classes_description[i]}.png"))
 
-    def make_test_image_prediction_visualisations(
+    def make_test_images_prediction_visualisations(
             self,
-            image: torch.Tensor,
-            masks: torch.Tensor,
+            images,
+            masks,
             outputs: torch.Tensor,
             results_folder_path: str
-
     ) -> None:
-        image_rgb = cv2.cvtColor(torch.squeeze(image).cpu().numpy(), cv2.COLOR_GRAY2RGB)
-        classes_count = len(self.classes_description)
+        outputs = torch.sigmoid(outputs)
+        outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+        outputs = predict_morphological_feature(outputs)
+        if "with_normalization" in results_folder_path:
+            images = self.denormalize(images)
 
         viz_folder = os.path.join(results_folder_path, "visualizations")
         if not os.path.exists(viz_folder):
             os.mkdir(viz_folder)
-        img_folder = os.path.join(viz_folder, "images")
+        img_folder = os.path.join(viz_folder, "test_images_predictions")
         if not os.path.exists(img_folder):
             os.mkdir(img_folder)
 
-        for i in range(classes_count):
-            mask_rgb = np.stack((masks[i].cpu().numpy(),) * 3, axis=-1)
-            output_rgb = np.stack((outputs[i].cpu().numpy(),) * 3, axis=-1)
-            if len(np.unique(mask_rgb)) > 1 or len(np.unique(output_rgb)) > 1:
-                # show on one frame
-                masked_img = np.copy(image_rgb)
-                masked_img[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
-                masked_img[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
-                result = cv2.addWeighted(masked_img, 0.3, image_rgb, 0.7, 0, masked_img)
-                img_path = os.path.join(img_folder, f"{self.classes_description[i]}.png")
-                cv2.imwrite(img_path, result)
-                # show on two separate frames
-                masked_img_duo1 = np.copy(image_rgb)
-                masked_img_duo2 = np.copy(image_rgb)
-                masked_img_duo1[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
-                result1 = cv2.addWeighted(masked_img_duo1, 0.3, image_rgb, 0.7, 0, masked_img_duo1)
-                masked_img_duo2[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
-                result2 = cv2.addWeighted(masked_img_duo2, 0.3, image_rgb, 0.7, 0, masked_img_duo2)
-                concatenated = np.hstack((result1, result2))
-                img_path = os.path.join(img_folder, f"{self.classes_description[i]}_duo.png")
-                cv2.imwrite(img_path, concatenated)
+        for i in range(len(images)):
+            image_rgb = cv2.cvtColor(torch.squeeze(images[i]).cpu().numpy(), cv2.COLOR_GRAY2RGB)
+            pred_folder = os.path.join(img_folder, f"{self.test_img_idx}")
+            os.mkdir(pred_folder)
 
-    def make_prediction_visualisation(self, image: torch.Tensor, pred: np.ndarray, out_folder_path: str) -> None:
+            for j in range(self.classes_count):
+                mask_rgb = np.stack((masks[i][j].cpu().numpy(),) * 3, axis=-1)
+                output_rgb = np.stack((outputs[i][j].cpu().numpy(),) * 3, axis=-1)
+                if len(np.unique(mask_rgb)) > 1 or len(np.unique(output_rgb)) > 1:
+                    # show on one frame
+                    masked_img = np.copy(image_rgb)
+                    masked_img[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
+                    masked_img[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
+                    result = cv2.addWeighted(masked_img, 0.3, image_rgb, 0.7, 0, masked_img)
+                    img_path = os.path.join(pred_folder, f"{self.classes_description[j]}.png")
+                    cv2.imwrite(img_path, result)
+                    # show on two separate frames
+                    masked_img_duo1 = np.copy(image_rgb)
+                    masked_img_duo2 = np.copy(image_rgb)
+                    masked_img_duo1[(mask_rgb == 1.0).all(-1)] = [0, 255, 0]
+                    result1 = cv2.addWeighted(masked_img_duo1, 0.3, image_rgb, 0.7, 0, masked_img_duo1)
+                    masked_img_duo2[(output_rgb == 1.0).all(-1)] = [0, 0, 255]
+                    result2 = cv2.addWeighted(masked_img_duo2, 0.3, image_rgb, 0.7, 0, masked_img_duo2)
+                    concatenated = np.hstack((result1, result2))
+                    img_path = os.path.join(pred_folder, f"{self.classes_description[j]}_duo.png")
+                    cv2.imwrite(img_path, concatenated)
+            self.test_img_idx += 1
+
+    def make_prediction_visualisation(self, image, outputs, out_folder_path: str) -> None:
+        if any(isinstance(t, A.Normalize) for t in config.data.IMAGE_PREDICTION_TRANSFORMATION.transforms):
+            image = self.denormalize(image)
+
         classes_count = len(self.classes_description)
         image_rgb = cv2.cvtColor(torch.squeeze(image).cpu().numpy(), cv2.COLOR_GRAY2RGB)
         for i in range(classes_count):
-            pred_rgb = np.stack((pred[i],) * 3, axis=-1)
+            pred_rgb = np.stack((outputs[i],) * 3, axis=-1)
             if len(np.unique(pred_rgb)) > 1:
                 masked_img = np.copy(image_rgb)
                 masked_img[(pred_rgb == 1.0).all(-1)] = [0, 255, 0]
                 result = cv2.addWeighted(masked_img, 0.3, image_rgb, 0.7, 0, masked_img)
                 img_path = os.path.join(out_folder_path, f"{self.classes_description[i]}.png")
                 cv2.imwrite(img_path, result)
+
+    @staticmethod
+    def denormalize(images):
+        """Denormalize one or multiple images"""
+        mean = torch.tensor([config.data.NORMALIZATION_MEAN]) * config.data.MAX_PIXEL_VALUE
+        std = torch.tensor([config.data.NORMALIZATION_STD]) * config.data.MAX_PIXEL_VALUE
+        logger.warning("Images have been denormalized.")
+        return (images.cpu() * std) + mean
