@@ -26,46 +26,54 @@ class SandGrainsDataset(Dataset):
         """
         Initialize the dataset creator.
 
-        :param mode: can be "train", "val" or "eval"
+        :param mode: can be "train", "val" or "eval".
         """
+        if mode not in ["train", "val", "eval"]:
+            raise ValueError(f"mode {mode} is not supported.")
         self.mode = mode
-        self.annot_path: Path = config.paths.TRAIN_ANNOTATIONS if self.mode in {"train", "val"} else config.paths.EVAL_ANNOTATIONS
-        self.img_path: Path = config.paths.TRAIN_IMAGES_FOLDER if self.mode in {"train", "val"} else config.paths.EVAL_IMAGES_FOLDER
+        self.annot_path: Path = config.paths.TRAIN_ANNOTATIONS if self.mode != "eval" else config.paths.EVAL_ANNOTATIONS
+        self.img_path: Path = config.paths.TRAIN_IMAGES_FOLDER if self.mode != "eval" else config.paths.EVAL_IMAGES_FOLDER
+        self.dataset_info_path: Path = config.paths.TRAIN_DATASET_INFO if self.mode != "eval" else config.paths.EVAL_DATASET_INFO
         self._coco: COCO = COCO(self.annot_path)
         self.dataset_info: Dict[str, Any] = {}
-        if self.mode in {"train", "val"}:
-            self._load_dataset_info()
+        self._load_dataset_info()
 
     def __len__(self) -> int:
-        if self.mode not in {"train", "val"}:
+        if self.mode == "eval":
             return len(self._coco.getImgIds())
         return self.dataset_info["train_size"] if self.mode == "train" else self.dataset_info["val_size"]
 
     def _load_dataset_info(self) -> None:
         """Load information about the training dataset."""
-        if not config.paths.TRAIN_DATASET_INFO.exists():
-            logger.warning("Original train dataset isn't split on train and validation. Splitting it now.")
-            self._train_val_split()
-            with open(config.paths.TRAIN_DATASET_INFO, "w") as f:
+        if not self.dataset_info_path.exists():
+            logger.warning("Dataset doesn't have dataset_info.json file. Generating a new one.")
+            self.get_main_dataset_info()
+            if self.mode != "eval":
+                logger.warning("Original train dataset isn't split on train and validation. Splitting it now.")
+                self._train_val_split()
+            with open(self.dataset_info_path, "w") as f:
                 json.dump(self.dataset_info, f, indent=4)
 
-        with open(config.paths.TRAIN_DATASET_INFO, "r", encoding="utf-8") as f:
+        with open(self.dataset_info_path, "r", encoding="utf-8") as f:
             self.dataset_info = json.load(f)
 
     def _train_val_split(self) -> None:
         """Split data on train and validation set"""
         img_ids = self._coco.getImgIds()
-        self.dataset_info["classes"] = {c['name']: c['id']-1 for c in self._coco.loadCats(self._coco.getCatIds())}
-        self.dataset_info["num_classes"] = len(self.dataset_info["classes"])
         random.shuffle(img_ids)
         # calculate sizes
-        self.dataset_info["img_count"] = len(img_ids)
         train_end = int(self.dataset_info["img_count"] * config.data.TRAIN_SIZE)
         # split indexes
         self.dataset_info["train_idx"] = img_ids[:train_end]
         self.dataset_info["train_size"] = len(self.dataset_info["train_idx"])
         self.dataset_info["val_idx"] = img_ids[train_end:]
         self.dataset_info["val_size"] = len(self.dataset_info["val_idx"])
+
+    def get_main_dataset_info(self) -> None:
+        """Calculate main dataset info."""
+        self.dataset_info["classes"] = {c['name']: c['id'] - 1 for c in self._coco.loadCats(self._coco.getCatIds())}
+        self.dataset_info["num_classes"] = len(self.dataset_info["classes"])
+        self.dataset_info["img_count"] = len(self._coco.getImgIds())
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -76,7 +84,7 @@ class SandGrainsDataset(Dataset):
         :return: two tensors, where first is image and second is mask.
         """
         coco_id: int = idx + 1 # coco indexes starts from 1
-        if self.mode in {"train", "val"}:
+        if self.mode != "eval":
             coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][idx]
         # load image
         image_path: Path = self.img_path / Path(self._coco.loadImgs(coco_id)[0]['file_name'])
