@@ -34,6 +34,8 @@ class MicroTextureDetector:
         "infer" is for run model on completely new images from user (on production).
         """
         self.mode = mode
+        if self.mode in ("train", "eval"):
+            self.run = self._init_neptune()
         self.model_path = model_path
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
@@ -46,7 +48,6 @@ class MicroTextureDetector:
         if self.mode in ("train", "eval"):
             self._load_data()
             if self.mode == "train":
-                self.run = self._init_neptune()
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
                 self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder_path()
