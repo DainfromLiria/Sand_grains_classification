@@ -54,7 +54,7 @@ class MicroTextureDetector:
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
                 self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder()
-                self.save_model_params()
+                self._save_model_params()
 
     # TODO check input image size for encoder backbone
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
@@ -131,7 +131,8 @@ class MicroTextureDetector:
         logger.addHandler(npt_handler)
         return run
 
-    def _make_results_folder(self) -> Path:
+    @staticmethod
+    def _make_results_folder() -> Path:
         """
         Make folder for model results (weights, setting, etc.)
 
@@ -144,7 +145,7 @@ class MicroTextureDetector:
         logger.info(f"Results will be save into: {results_folder_path}")
         return results_folder_path
 
-    def save_model_params(self) -> None:
+    def _save_model_params(self) -> None:
         """Save main model parameters into json file and send params into neptune."""
         model_params: dict = {
             "model": config.model.MODEL,
