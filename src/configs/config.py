@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import albumentations as A
+import cv2
 import torch
-from pathlib import Path
-from albumentations.pytorch import ToTensorV2
 
 
 @dataclass
@@ -11,6 +11,11 @@ class Paths:
     # main
     ROOT: Path = Path(__file__).resolve().parent.parent.parent
     DATA: Path = ROOT / "data"
+
+    PREDICTIONS_FOLDER: Path = ROOT / "predictions"
+    PREDICTIONS_FOLDER.mkdir(parents=False, exist_ok=True)
+    RESULTS_FOLDER: Path = ROOT / "results"
+    RESULTS_FOLDER.mkdir(parents=False, exist_ok=True)
 
     # train dataset path
     TRAIN_DATA: Path = DATA / "train"
@@ -24,7 +29,41 @@ class Paths:
     EVAL_IMAGES_FOLDER: Path = EVAL_DATA / "images"
     EVAL_ANNOTATION_FOLDER: Path = EVAL_DATA / "annotations"
     EVAL_ANNOTATIONS: Path = EVAL_ANNOTATION_FOLDER / "instances_default.json"
+    EVAL_DATASET_INFO: Path = EVAL_ANNOTATION_FOLDER / "dataset_info.json"
 
+
+
+@dataclass
+class Transformations:
+    # augmentations
+    AUGMENTATIONS: A.Compose = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.Rotate(limit=(-45, 45), p=0.5, border_mode=cv2.BORDER_REFLECT), # mirror reflection of the border elements
+        A.RandomBrightnessContrast(p=0.5),
+        A.GaussNoise(std_range=(0.1, 0.2), mean_range=(0.0, 0.0), p=0.2),
+        A.ElasticTransform(alpha=80, sigma=50, p=0.3),
+    ])
+
+    # test time augmentations
+    TTA_AUGMENTATIONS: list = field(default_factory=lambda: [
+        A.HorizontalFlip(p=1.0),
+        A.VerticalFlip(p=1.0),
+        A.Rotate(limit=(-45, 45), p=1.0)
+    ])
+
+    # preprocessing transformations TODO explore and change
+    NORMALIZATION_MEAN: float = 68.451
+    NORMALIZATION_STD: float = 32.061
+    IMAGE_TRANSFORMATIONS: A.Compose = A.Compose([
+        A.CLAHE(p=1.0),
+        A.Sharpen(p=1.0),
+        # A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
+        # A.Resize(height=520, width=520),
+    ])
+    MASK_TRANSFORMATION: A.Compose = A.Compose([
+        # A.Resize(height=520, width=520)
+    ])
 
 @dataclass
 class DataConfig:
@@ -33,6 +72,7 @@ class DataConfig:
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
     MAX_PIXEL_VALUE: int = 255
+    CLASSES_COUNT: int = 19 # TODO change to actual number of classes
 
     # =====================================================================================
     # TODO update for new dataset !!!!
@@ -44,55 +84,20 @@ class DataConfig:
     TRAIN_SIZE: float = 0.9
     RANDOM_SEED: int = 42
 
-    # =====================================================================================
-    # augmentations TODO explore and change
-    AUGMENTATIONS: A.Compose = A.Compose([
-        A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
-        # A.RandomToneCurve(scale=0.3, p=1.0),  # RandomToneCurve change only brightness and contrast
-        # A.GaussNoise(p=1.0),
-        # A.PixelDropout(mask_drop_value=0.0, p=1.0),
-        # A.Sharpen(p=1.0),
-        A.GridElasticDeform(num_grid_xy=(10, 10), magnitude=30, p=1.0),
-        A.ShiftScaleRotate(p=1.0)  # use it instead of Rotate because it can make rotate, translate or scale
-    ])
-    # =====================================================================================
-
-    # TTA_AUGMENTATIONS: list = field(default_factory=lambda: [
-    #     A.HorizontalFlip(p=1.0),
-    #     A.Rotate(limit=(-45, 45), p=1.0)
-    # ])
-
-    NORMALIZATION_MEAN: float = 68.451
-    NORMALIZATION_STD: float = 32.061
-    IMAGE_TRAIN_TRANSFORMATIONS: A.Compose = A.Compose([
-        # A.CLAHE(),
-        # A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
-        # A.Resize(height=520, width=520),
-        ToTensorV2()
-    ])
-    MASK_TRAIN_TRANSFORMATION: A.Compose = A.Compose([
-        # A.Resize(height=520, width=520)
-    ])
-    # ===============================================================================================================
-    IMAGE_PREDICTION_TRANSFORMATION: A.Compose = A.Compose([
-        # A.CLAHE()
-        # A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
-        # A.Resize(height=520, width=520),
-        ToTensorV2()
-    ])
-
-    PREDICTIONS_FOLDER_PATH: str = "../predictions"
-
 
 @dataclass
-class ModelConfig:
-    MODELS_DIR_PATH: str = "../models"
+class Model:
     DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    AVAILABLE_MODELS: list = field(default_factory=lambda:['Unet', 'DeepLabV3Plus', 'Segformer'])
+    MODEL: str = 'Unet'
+    ENCODER: str = 'xception' # xception for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
+    # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
+    ENCODER_WEIGHTS: str = "image-micronet"
     BATCH_SIZE: int = 5
     LEARNING_RATE: float = 1e-6
     EPOCH_COUNT: int = 300
     THRESHOLD: float = 0.9
+    METRICS_COUNT: int = 3
 
     # Focal Loss configs
     F_GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
@@ -104,14 +109,14 @@ class ModelConfig:
 
     # Early stopping config
     PATIENCE: int = 70
-    RESULTS_DIR: str = "../results"
 
 
 @dataclass
 class Configs:
     paths: Paths = field(default_factory=Paths)
     data: DataConfig = field(default_factory=DataConfig)
-    model: ModelConfig = field(default_factory=ModelConfig)
+    model: Model = field(default_factory=Model)
+    transform: Transformations = field(default_factory=Transformations)
 
 
 config = Configs()
