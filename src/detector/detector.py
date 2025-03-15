@@ -1,14 +1,13 @@
+import json
 import logging
 import os
 import uuid
+from pathlib import Path
 
-import albumentations as A
 import cv2
-import json
 import neptune
 import segmentation_models_pytorch as smp
 import torch
-from pathlib import Path
 import torch.utils.model_zoo as model_zoo
 from dotenv import load_dotenv
 from neptune.integrations.python_logger import NeptuneHandler
@@ -156,13 +155,13 @@ class MicroTextureDetector:
             "epoch_count": config.model.EPOCH_COUNT,
             "loss_function": self.loss_fn.__class__.__name__,
             "optimizer": self.optimizer.__class__.__name__,
+            "patience": config.model.PATIENCE,
             # TODO add another params
         }
         self.run["params"] = model_params
         model_params_path: Path = self.results_folder_path / "model_params.json"
         with open(model_params_path, "w") as f:
             json.dump(model_params, f, indent=4)
-
 
     def train(self) -> None:
         """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
