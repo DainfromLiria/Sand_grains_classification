@@ -1,14 +1,17 @@
 import logging
 import os
+import uuid
 
 import albumentations as A
 import cv2
+import json
 import neptune
-from neptune.integrations.python_logger import NeptuneHandler
 import segmentation_models_pytorch as smp
 import torch
+from pathlib import Path
 import torch.utils.model_zoo as model_zoo
 from dotenv import load_dotenv
+from neptune.integrations.python_logger import NeptuneHandler
 from pretrained_microscopy_models.util import get_pretrained_microscopynet_url
 from torch import nn
 from torch.utils.data import DataLoader
@@ -39,7 +42,7 @@ class MicroTextureDetector:
         self.model_path = model_path
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
-        self.model = self.create_model(
+        self.model = self._create_model(
             model_name=config.model.MODEL,
             encoder=config.model.ENCODER,
             encoder_weights=config.model.ENCODER_WEIGHTS
@@ -50,10 +53,11 @@ class MicroTextureDetector:
             if self.mode == "train":
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
                 self.loss_fn = FocalTverskyLoss()
-                self.results_folder_path = self._make_results_folder_path()
+                self.results_folder_path = self._make_results_folder()
+                self.save_model_params()
 
     # TODO check input image size for encoder backbone
-    def create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
+    def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
         Returns segmentation model with the specified encoder backbone.
         Reworked function from https://github.com/nasa/pretrained-microscopy-models/tree/main
@@ -127,29 +131,37 @@ class MicroTextureDetector:
         logger.addHandler(npt_handler)
         return run
 
-    def _make_results_folder_path(self) -> str:
+    def _make_results_folder(self) -> Path:
         """
-        Make folder for model results (weights, graphs, images, etc.)
+        Make folder for model results (weights, setting, etc.)
 
         :return: path to results folder
         """
-        transforms = config.data.IMAGE_TRAIN_TRANSFORMATION.transforms
-        resized = "with_resize" if any(isinstance(t, A.Resize) for t in transforms) else "without_resize"
-        normalized = "with_normalization" if any(
-            isinstance(t, A.Normalize) for t in transforms) else "without_normalization"
         # assemble name
-        folder_name = (
-            f"{self.model.__class__.__name__}_{self.loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs"
-            f"_{config.model.BATCH_SIZE}_batches_{config.model.LEARNING_RATE}_lr"
-            f"_{normalized}_{resized}_resnet50_CLAHE_DELETE")
-        # make dir for results
-        if not os.path.exists(config.model.RESULTS_DIR):
-            os.mkdir(config.model.RESULTS_DIR)
-        results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
-        if not os.path.exists(results_folder_path):
-            os.mkdir(results_folder_path)
-        logger.info(f"Results saved into: {results_folder_path}")
+        folder_name: Path = Path(str(uuid.uuid4()))
+        results_folder_path: Path = config.paths.RESULTS_FOLDER / folder_name
+        results_folder_path.mkdir(parents=False, exist_ok=False)
+        logger.info(f"Results will be save into: {results_folder_path}")
         return results_folder_path
+
+    def save_model_params(self) -> None:
+        """Save main model parameters into json file and send params into neptune."""
+        model_params: dict = {
+            "model": config.model.MODEL,
+            "encoder": config.model.ENCODER,
+            "encoder_weights": config.model.ENCODER_WEIGHTS,
+            "batch_size": config.model.BATCH_SIZE,
+            "lr": config.model.LEARNING_RATE,
+            "epoch_count": config.model.EPOCH_COUNT,
+            "loss_function": self.loss_fn.__class__.__name__,
+            "optimizer": self.optimizer.__class__.__name__,
+            # TODO add another params
+        }
+        self.run["params"] = model_params
+        model_params_path: Path = self.results_folder_path / "model_params.json"
+        with open(model_params_path, "w") as f:
+            json.dump(model_params, f, indent=4)
+
 
     def train(self) -> None:
         """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
