@@ -3,49 +3,150 @@ import os
 
 import albumentations as A
 import cv2
+import neptune
+import segmentation_models_pytorch as smp
 import torch
+import torch.utils.model_zoo as model_zoo
+from dotenv import load_dotenv
+from pretrained_microscopy_models.util import get_pretrained_microscopynet_url
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
-                                             deeplabv3_resnet50)
 from tqdm import tqdm
 
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_metrics
-from metrics.loss import FocalLoss, FocalTverskyLoss
+from metrics.loss import FocalTverskyLoss
 from utils import predict_morphological_feature
-from visualizer import Visualizer
 
 logger = logging.getLogger(__name__)
 
 
 class MicroTextureDetector:
 
-    METRICS_COUNT: int = 3
+    METRICS_COUNT: int = 3 # TODO move to config
 
-    def __init__(self, model_path: str = None, train: bool = True):
+    def __init__(self, mode: str, model_path: str = None):
         """
         Initialize detector.
 
         :param model_path: optional path to model weights. If None, use DeepLabV3_ResNet50_Weights.
-        :param train: if true run in train mode, else run in prediction mode.
+        :param mode: can be 'train', 'eval' and 'infer'. 'eval' is for run model on test dataset, but
+        "infer" is for run model on completely new images from user (on production).
         """
+        self.mode = mode
+        self.model_path = model_path
+        logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
-        self._load_data()
-        self._load_model(model_path)
-        self.visualizer = Visualizer()
+        self.model = self.create_model(
+            model_name=config.model.MODEL,
+            encoder=config.model.ENCODER,
+            encoder_weights=config.model.ENCODER_WEIGHTS
+        )
 
-        if train:
-            logger.warning(f"Model run in TRAIN mode!")
-            self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
-            # self.loss_fn = FocalLoss()
-            self.loss_fn = FocalTverskyLoss()
-            self.results_folder_path = self._make_results_folder_path()
+        if self.mode in ("train", "eval"):
+            self._load_data()
+            if self.mode == "train":
+                self.run = self._init_neptune()
+                self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
+                self.loss_fn = FocalTverskyLoss()
+                self.results_folder_path = self._make_results_folder_path()
+
+    def create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
+        """
+        Returns segmentation model with the specified encoder backbone.
+        Reworked function from https://github.com/nasa/pretrained-microscopy-models/tree/main
+
+        :param model_name: available segmentation model. Can be 'Unet',
+        'DeepLabV3Plus' or 'Segformer'.
+        :param encoder: available encoder backbones in segmentation_models_pytorch
+        such as 'ResNet50' or 'xception'.
+        :param encoder_weights: The dataset that the encoder was pre-trained on.
+                One of ['micronet', 'image-micronet', 'imagenet', 'None']
+
+        :return: PyTorch model for segmentation
+        """
+        if model_name not in config.model.AVAILABLE_MODELS:
+            raise ValueError(f"Model {model_name} is not available.")
+        logger.info(f"Model architecture: {model_name}")
+        logger.info(f"Encoder backbone: {encoder}")
+        logger.info(f"Encoder weights: {encoder_weights}")
+
+        initial_weights = 'imagenet' if encoder_weights == 'imagenet' else None
+
+        # create the model
+        model = getattr(smp, model_name)(
+            encoder_name=encoder,
+            encoder_weights=initial_weights,
+            classes=config.data.CLASSES_COUNT
+        )
+
+        # load pretrained weights
+        if encoder_weights in ['micronet', 'image-micronet']:
+            url = get_pretrained_microscopynet_url(encoder, encoder_weights)
+            model.encoder.load_state_dict(model_zoo.load_url(url, map_location=config.model.DEVICE))
+
+        # load custom weights
+        if self.model_path is not None:
+            if not os.path.exists(self.model_path):
+                raise FileNotFoundError(f"File {self.model_path} does not exists!")
+            model.load_state_dict(torch.load(self.model_path, weights_only=True))
+            logger.info(f"Model weights loaded from {self.model_path}")
+
+        model.to(config.model.DEVICE)
+        return model
+
+    def _load_data(self) -> None:
+        """Load train, validation and test datasets and create DataLoaders."""
+        if self.mode == "train":
+            self.train_dataset = SandGrainsDataset(mode="train")
+            self.classes_count = self.train_dataset.dataset_info["num_classes"]
+            logger.info(f"Dataset classes count: {self.classes_count}")
+            logger.info(f"Train dataset size: {len(self.train_dataset)}")
+            self.val_dataset = SandGrainsDataset(mode="val")
+            logger.info(f"Val dataset size: {len(self.val_dataset)}")
+            self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+            self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+        elif self.mode == "eval":
+            self.test_dataset = SandGrainsDataset(mode="eval")
+            logger.info(f"Test dataset size: {len(self.test_dataset)}")
+            self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+        logger.info(f"Batch size: {config.model.BATCH_SIZE}")
+
+    @staticmethod
+    def _init_neptune() -> neptune.Run:
+        """Initialize neptune Run."""
+        load_dotenv()
+        return neptune.init_run(
+            project=os.getenv("NEPTUNE_PROJECT"),
+            api_token=os.getenv("NEPTUNE_API_KEY"),
+            source_files=[]  # TODO add tracked files
+        )
 
     def train(self) -> None:
-        self._train_loop()
-        self.visualizer.visualize(self.results_folder_path)
+        """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
+        best_loss = float("inf")
+        patience = config.model.PATIENCE
+        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
+            logger.info(f"EPOCH {epoch}")
+            train_loss = self._train_one_epoch()
+            val_loss = self._validate_one_epoch()
+            logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
+
+            if val_loss is torch.nan or train_loss is torch.nan:
+                raise Exception("Loss is nan!!!")
+
+            # early stopping
+            if val_loss < best_loss:
+                best_loss = val_loss
+                patience = config.model.PATIENCE
+                model_path = os.path.join(self.results_folder_path, "model.pt")
+                torch.save(self.model.state_dict(), model_path)
+                logger.info("Best model saved")
+            else:
+                patience -= 1
+                if patience <= 0:
+                    break
 
     def _make_results_folder_path(self) -> str:
         """
@@ -70,73 +171,6 @@ class MicroTextureDetector:
             os.mkdir(results_folder_path)
         logger.info(f"Results saved into: {results_folder_path}")
         return results_folder_path
-
-    def _load_data(self):
-        """Load train, validation and test datasets and create DataLoaders."""
-        self.train_dataset = SandGrainsDataset(path=config.data.TRAIN_SET_PATH)
-        self.classes_count = self.train_dataset.info["classes_count"]
-        logger.info(f"Dataset classes count: {self.classes_count}")
-        logger.info(f"Train dataset size: {len(self.train_dataset)}")
-        self.val_dataset = SandGrainsDataset(path=config.data.VAL_SET_PATH)
-        logger.info(f"Val dataset size: {len(self.val_dataset)}")
-        self.test_dataset = SandGrainsDataset(path=config.data.TEST_SET_PATH)
-        logger.info(f"Test dataset size: {len(self.test_dataset)}")
-        logger.info(f"Batch size: {config.model.BATCH_SIZE}")
-        self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-        self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-        self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-
-    def _load_model(self, model_path: str = None) -> None:
-        """
-        Load model and weights.
-
-        :param model_path: path to file with model weights.
-        """
-        # load model architecture with pretrained weights
-        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
-        # ============================================================================================================
-        # change first conv layer of backbone nn (ResNet50) for grayscale images
-        # https://discuss.pytorch.org/t/how-to-modify-deeplabv3-and-fcn-models-for-grayscale-images/52688
-        self.model.backbone.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        # ============================================================================================================
-        # change the last layer output classes
-        self.model.classifier[-1] = torch.nn.Conv2d(256, self.classes_count, 1)
-        # ============================================================================================================
-        logger.info(f"Model: {self.model.__class__.__name__}")
-
-        # load custom weights
-        if model_path is not None:
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"File {model_path} does not exists!")
-            self.model.load_state_dict(torch.load(model_path, weights_only=True))
-            logger.info(f"Loaded model weights from {model_path}")
-
-        self.model.to(config.model.DEVICE)
-
-    def _train_loop(self) -> None:
-        """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
-        best_loss = float("inf")
-        patience = config.model.PATIENCE
-        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
-            logger.info(f"EPOCH {epoch}")
-            train_loss = self._train_one_epoch()
-            val_loss = self._validate_one_epoch()
-            logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
-
-            if val_loss is torch.nan or train_loss is torch.nan:
-                raise Exception("Loss is nan!!!")
-
-            # early stopping
-            if val_loss < best_loss:
-                best_loss = val_loss
-                patience = config.model.PATIENCE
-                model_path = os.path.join(self.results_folder_path, "model.pt")
-                torch.save(self.model.state_dict(), model_path)
-                logger.info("Best model saved")
-            else:
-                patience -= 1
-                if patience <= 0:
-                    break
 
     def _train_one_epoch(self) -> float:
         """
