@@ -4,6 +4,7 @@ import os
 import albumentations as A
 import cv2
 import neptune
+from neptune.integrations.python_logger import NeptuneHandler
 import segmentation_models_pytorch as smp
 import torch
 import torch.utils.model_zoo as model_zoo
@@ -23,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 class MicroTextureDetector:
-
-    METRICS_COUNT: int = 3 # TODO move to config
 
     def __init__(self, mode: str, model_path: str = None):
         """
@@ -52,6 +51,7 @@ class MicroTextureDetector:
                 self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder_path()
 
+    # TODO check input image size for encoder backbone
     def create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
         Returns segmentation model with the specified encoder backbone.
@@ -117,11 +117,38 @@ class MicroTextureDetector:
     def _init_neptune() -> neptune.Run:
         """Initialize neptune Run."""
         load_dotenv()
-        return neptune.init_run(
+        run: neptune.Run = neptune.init_run(
             project=os.getenv("NEPTUNE_PROJECT"),
             api_token=os.getenv("NEPTUNE_API_KEY"),
             source_files=[]  # TODO add tracked files
         )
+        npt_handler = NeptuneHandler(run=run)
+        logger.addHandler(npt_handler)
+        return run
+
+    def _make_results_folder_path(self) -> str:
+        """
+        Make folder for model results (weights, graphs, images, etc.)
+
+        :return: path to results folder
+        """
+        transforms = config.data.IMAGE_TRAIN_TRANSFORMATION.transforms
+        resized = "with_resize" if any(isinstance(t, A.Resize) for t in transforms) else "without_resize"
+        normalized = "with_normalization" if any(
+            isinstance(t, A.Normalize) for t in transforms) else "without_normalization"
+        # assemble name
+        folder_name = (
+            f"{self.model.__class__.__name__}_{self.loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs"
+            f"_{config.model.BATCH_SIZE}_batches_{config.model.LEARNING_RATE}_lr"
+            f"_{normalized}_{resized}_resnet50_CLAHE_DELETE")
+        # make dir for results
+        if not os.path.exists(config.model.RESULTS_DIR):
+            os.mkdir(config.model.RESULTS_DIR)
+        results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
+        if not os.path.exists(results_folder_path):
+            os.mkdir(results_folder_path)
+        logger.info(f"Results saved into: {results_folder_path}")
+        return results_folder_path
 
     def train(self) -> None:
         """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
@@ -147,30 +174,6 @@ class MicroTextureDetector:
                 patience -= 1
                 if patience <= 0:
                     break
-
-    def _make_results_folder_path(self) -> str:
-        """
-        Make folder for model results (weights, graphs, images, etc.)
-
-        :return: path to results folder
-        """
-        transforms = config.data.IMAGE_TRAIN_TRANSFORMATION.transforms
-        resized = "with_resize" if any(isinstance(t, A.Resize) for t in transforms) else "without_resize"
-        normalized = "with_normalization" if any(
-            isinstance(t, A.Normalize) for t in transforms) else "without_normalization"
-        # assemble name
-        folder_name = (
-            f"{self.model.__class__.__name__}_{self.loss_fn.__class__.__name__}_{config.model.EPOCH_COUNT}_epochs"
-            f"_{config.model.BATCH_SIZE}_batches_{config.model.LEARNING_RATE}_lr"
-            f"_{normalized}_{resized}_resnet50_CLAHE_DELETE")
-        # make dir for results
-        if not os.path.exists(config.model.RESULTS_DIR):
-            os.mkdir(config.model.RESULTS_DIR)
-        results_folder_path = os.path.join(config.model.RESULTS_DIR, folder_name)
-        if not os.path.exists(results_folder_path):
-            os.mkdir(results_folder_path)
-        logger.info(f"Results saved into: {results_folder_path}")
-        return results_folder_path
 
     def _train_one_epoch(self) -> float:
         """
