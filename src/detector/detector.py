@@ -37,6 +37,7 @@ class MicroTextureDetector:
         """
         self.mode = mode
         if self.mode in ("train", "eval"):
+            self.experiment_uuid: str = str(uuid.uuid4())  # TODO make it instead of model_path
             self.run = self._init_neptune()
         self.model_path = model_path
         logger.warning(f"Model run in {mode} mode!")
@@ -117,28 +118,27 @@ class MicroTextureDetector:
             self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
         logger.info(f"Batch size: {config.model.BATCH_SIZE}")
 
-    @staticmethod
-    def _init_neptune() -> neptune.Run:
+    def _init_neptune(self) -> neptune.Run:
         """Initialize neptune Run."""
         load_dotenv()
         run: neptune.Run = neptune.init_run(
             project=os.getenv("NEPTUNE_PROJECT"),
             api_token=os.getenv("NEPTUNE_API_KEY"),
+            name=self.experiment_uuid,
             source_files=[]  # TODO add tracked files
         )
         npt_handler = NeptuneHandler(run=run)
         logger.addHandler(npt_handler)
         return run
 
-    @staticmethod
-    def _make_results_folder() -> Path:
+    def _make_results_folder(self) -> Path:
         """
         Make folder for model results (weights, setting, etc.)
 
         :return: path to results folder
         """
         # assemble name
-        folder_name: Path = Path(str(uuid.uuid4()))
+        folder_name: Path = Path(self.experiment_uuid)
         results_folder_path: Path = config.paths.RESULTS_FOLDER / folder_name
         results_folder_path.mkdir(parents=False, exist_ok=False)
         logger.info(f"Results will be save into: {results_folder_path}")
@@ -147,6 +147,7 @@ class MicroTextureDetector:
     def _save_model_params(self) -> None:
         """Save main model parameters into json file and send params into neptune."""
         model_params: dict = {
+            "mode": self.mode,
             "model": config.model.MODEL,
             "encoder": config.model.ENCODER,
             "encoder_weights": config.model.ENCODER_WEIGHTS,
@@ -207,6 +208,7 @@ class MicroTextureDetector:
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
         avg_train_loss = running_cum_loss / len(self.train_dataset)
+        self.run["train_loss"] = avg_train_loss
         self.visualizer.train_loss.append(avg_train_loss)
         return avg_train_loss
 
