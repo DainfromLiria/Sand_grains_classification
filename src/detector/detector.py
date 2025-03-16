@@ -208,8 +208,7 @@ class MicroTextureDetector:
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
         avg_train_loss = running_cum_loss / len(self.train_dataset)
-        self.run["train_loss"] = avg_train_loss
-        self.visualizer.train_loss.append(avg_train_loss)
+        self.run["train/loss"] = avg_train_loss
         return avg_train_loss
 
     def _validate_one_epoch(self, store_metrics: bool = True) -> float:
