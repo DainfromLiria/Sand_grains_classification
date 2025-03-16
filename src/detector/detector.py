@@ -86,7 +86,7 @@ class MicroTextureDetector:
         )
 
         # load pretrained weights
-        if encoder_weights in ['micronet', 'image-micronet']:
+        if encoder_weights in ['micronet', 'image-micronet'] and model_name != 'Segformer':
             url = get_pretrained_microscopynet_url(encoder, encoder_weights)
             model.encoder.load_state_dict(model_zoo.load_url(url, map_location=config.model.DEVICE))
 
