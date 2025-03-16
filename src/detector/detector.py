@@ -201,7 +201,7 @@ class MicroTextureDetector:
         for images, masks in self.train_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             self.optimizer.zero_grad()  # reset the gradients for new batch
-            outputs = self.model(images)['out']  # forward
+            outputs = self.model(images)  # forward
             loss = self.loss_fn(outputs, masks)  # compute loss
             loss.backward()  # backward
             self.optimizer.step()  # step of input optimizer
@@ -226,7 +226,7 @@ class MicroTextureDetector:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                outputs = self.model(images)['out']
+                outputs = self.model(images)
                 loss = self.loss_fn(outputs, masks)
             metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             running_cum_loss += loss.item() * images.shape[0]
@@ -261,7 +261,7 @@ class MicroTextureDetector:
     #         images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
     #         # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
     #         with torch.no_grad():
-    #             outputs = self.model(images)['out']
+    #             outputs = self.model(images)
     #         metrics += calculate_metrics(outputs, masks).to("cpu")
     #         self.visualizer.make_test_images_prediction_visualisations(images, masks, outputs, results_folder_path)
     #         batch_count += 1
@@ -290,7 +290,7 @@ class MicroTextureDetector:
     #         os.mkdir(img_predictions_folder_path)
     #
     #     with torch.no_grad():
-    #         outputs = self.model(image)['out']
+    #         outputs = self.model(image)
     #         outputs = torch.sigmoid(outputs)
     #         outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
     #         outputs = predict_morphological_feature(outputs)
