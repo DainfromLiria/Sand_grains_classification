@@ -2,8 +2,8 @@ import logging
 
 import torch
 
-from utils import predict_morphological_feature
 from configs import config
+from utils import predict_morphological_feature
 
 logger = logging.getLogger(__name__)
 
