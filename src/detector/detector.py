@@ -4,7 +4,6 @@ import os
 import uuid
 from pathlib import Path
 
-import cv2
 import neptune
 import segmentation_models_pytorch as smp
 import torch
@@ -165,7 +164,7 @@ class MicroTextureDetector:
             json.dump(model_params, f, indent=4)
 
     def train(self) -> None:
-        """Train and evaluate model on config.model.EPOCH_COUNT epochs."""
+        """Train and validate model."""
         best_loss = float("inf")
         patience = config.model.PATIENCE
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
@@ -181,13 +180,15 @@ class MicroTextureDetector:
             if val_loss < best_loss:
                 best_loss = val_loss
                 patience = config.model.PATIENCE
-                model_path = os.path.join(self.results_folder_path, "model.pt")
+                model_path: Path = self.results_folder_path / "model.pt"
                 torch.save(self.model.state_dict(), model_path)
+                self.run["model/checkpoints"].upload(str(model_path))
                 logger.info("Best model saved")
             else:
                 patience -= 1
                 if patience <= 0:
                     break
+        self.run.stop()
 
     def _train_one_epoch(self) -> float:
         """
@@ -208,20 +209,18 @@ class MicroTextureDetector:
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
         avg_train_loss = running_cum_loss / len(self.train_dataset)
-        self.run["train/loss"] = avg_train_loss
+        self.run["train/epoch/loss"].append(avg_train_loss)
         return avg_train_loss
 
-    def _validate_one_epoch(self, store_metrics: bool = True) -> float:
+    def _validate_one_epoch(self) -> float:
         """
         Calculate loss and metrics on validation dataset.
-
-        :param store_metrics: if True, store metrics in file.
 
         :return: average validation loss per epoch.
         """
         self.model.eval()  # set model in evaluation mode.
         running_cum_loss = 0.0
-        metrics = torch.zeros((self.METRICS_COUNT, self.classes_count))
+        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, self.classes_count))
         batch_count = 0
         for images, masks in self.val_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
@@ -229,81 +228,87 @@ class MicroTextureDetector:
             with torch.no_grad():
                 outputs = self.model(images)['out']
                 loss = self.loss_fn(outputs, masks)
-            metrics += calculate_metrics(outputs, masks).to("cpu")
+            metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             running_cum_loss += loss.item() * images.shape[0]
             batch_count += 1
-        # calculate loss and metrics per epoch
-        avg_val_loss = running_cum_loss / len(self.val_dataset)
-        avg_metrics_per_class = metrics / batch_count
-        avg_metrics = torch.mean(avg_metrics_per_class, 1)
+        # calculate epoch loss
+        avg_val_loss: float = running_cum_loss / len(self.val_dataset)
+        self.run["val/epoch/loss"] = avg_val_loss
+        # calculate epoch metrics
+        avg_metrics_per_class: torch.Tensor = metrics_per_class / batch_count
+        avg_metrics: torch.Tensor = torch.mean(avg_metrics_per_class, 1)
         logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
-        # save data for visualizations
-        if store_metrics:
-            self.visualizer.store_metrics(avg_metrics.numpy(), avg_metrics_per_class.numpy())
-            self.visualizer.validation_loss.append(avg_val_loss)
+        # send data to neptune
+        self.run["val/epoch/metric/iou"].append(avg_metrics[0])
+        self.run["val/epoch/metric/recall"].append(avg_metrics[1])
+        self.run["val/epoch/metric/precision"].append(avg_metrics[2])
+        for i in range(avg_metrics_per_class.shape[1]):
+            self.run[f"val/epoch/metric/{i}/iou"].append(avg_metrics_per_class[:, i][0])
+            self.run[f"val/epoch/metric/{i}/recall"].append(avg_metrics_per_class[:, i][1])
+            self.run[f"val/epoch/metric/{i}/precision"].append(avg_metrics_per_class[:, i][2])
         return avg_val_loss
 
-    def evaluate_test_data(self, results_folder_path: str) -> None:
-        """
-        Evaluate test dataset and save results (images with predictions) into results_folder_path.
-
-        :param results_folder_path: path to folder where images with predictions will be saved.
-        """
-        self.model.eval()  # set model in evaluation mode.
-        metrics = torch.zeros((self.METRICS_COUNT, self.classes_count))
-        batch_count = 0
-        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
-            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
-            with torch.no_grad():
-                outputs = self.model(images)['out']
-            metrics += calculate_metrics(outputs, masks).to("cpu")
-            self.visualizer.make_test_images_prediction_visualisations(images, masks, outputs, results_folder_path)
-            batch_count += 1
-        # calculate metrics
-        avg_metrics_per_class = metrics / batch_count
-        print(f"Avg metrics: {torch.round(avg_metrics_per_class, decimal=4)}")
-        avg_metrics = torch.mean(avg_metrics_per_class, 1)
-        logger.info(f"[TEST] IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
-
-    def predict(self, img_name: str) -> None:
-        """
-        Generate prediction for image.
-
-        :param img_name: name of image in PREDICTIONS_FOLDER (for example: A2.tif).
-        """
-        self.model.eval()
-        img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(f"File with name {img_name} does not found.")
-
-        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        image = config.data.IMAGE_PREDICTION_TRANSFORMATION(image=image)["image"]
-        image = image.float().to(config.model.DEVICE).unsqueeze(0)
-        img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
-        if not os.path.exists(img_predictions_folder_path):
-            os.mkdir(img_predictions_folder_path)
-
-        with torch.no_grad():
-            outputs = self.model(image)['out']
-            outputs = torch.sigmoid(outputs)
-            outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
-            outputs = predict_morphological_feature(outputs)
-        self.visualizer.make_prediction_visualisation(image, outputs[0].cpu().numpy(), img_predictions_folder_path)
-
-    def calculate_normalization_std_mean(self):
-        """
-        Calculate mean and std on train data for normalization.
-        Calculation speed depends on the batch size.
-        """
-        mean = 0
-        std = 0
-        count = 0
-        for images, masks in tqdm(self.train_loader, desc="Calculating std and mean"):
-            images, _ = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-            std += torch.std(images)
-            mean += torch.mean(images)
-            count += 1
-        std = std / count
-        mean = mean / count
-        logger.info(f"Mean: {mean}, Std: {std}")
+    # def evaluate_test_data(self, results_folder_path: str) -> None:
+    #     """
+    #     Evaluate test dataset and save results (images with predictions) into results_folder_path.
+    #
+    #     :param results_folder_path: path to folder where images with predictions will be saved.
+    #     """
+    #     self.model.eval()  # set model in evaluation mode.
+    #     metrics = torch.zeros((self.METRICS_COUNT, self.classes_count))
+    #     batch_count = 0
+    #     for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
+    #         images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+    #         # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+    #         with torch.no_grad():
+    #             outputs = self.model(images)['out']
+    #         metrics += calculate_metrics(outputs, masks).to("cpu")
+    #         self.visualizer.make_test_images_prediction_visualisations(images, masks, outputs, results_folder_path)
+    #         batch_count += 1
+    #     # calculate metrics
+    #     avg_metrics_per_class = metrics / batch_count
+    #     print(f"Avg metrics: {torch.round(avg_metrics_per_class, decimal=4)}")
+    #     avg_metrics = torch.mean(avg_metrics_per_class, 1)
+    #     logger.info(f"[TEST] IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
+    #
+    # def predict(self, img_name: str) -> None:
+    #     """
+    #     Generate prediction for image.
+    #
+    #     :param img_name: name of image in PREDICTIONS_FOLDER (for example: A2.tif).
+    #     """
+    #     self.model.eval()
+    #     img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
+    #     if not os.path.exists(img_path):
+    #         raise FileNotFoundError(f"File with name {img_name} does not found.")
+    #
+    #     image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    #     image = config.data.IMAGE_PREDICTION_TRANSFORMATION(image=image)["image"]
+    #     image = image.float().to(config.model.DEVICE).unsqueeze(0)
+    #     img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
+    #     if not os.path.exists(img_predictions_folder_path):
+    #         os.mkdir(img_predictions_folder_path)
+    #
+    #     with torch.no_grad():
+    #         outputs = self.model(image)['out']
+    #         outputs = torch.sigmoid(outputs)
+    #         outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+    #         outputs = predict_morphological_feature(outputs)
+    #     self.visualizer.make_prediction_visualisation(image, outputs[0].cpu().numpy(), img_predictions_folder_path)
+    #
+    # def calculate_normalization_std_mean(self):
+    #     """
+    #     Calculate mean and std on train data for normalization.
+    #     Calculation speed depends on the batch size.
+    #     """
+    #     mean = 0
+    #     std = 0
+    #     count = 0
+    #     for images, masks in tqdm(self.train_loader, desc="Calculating std and mean"):
+    #         images, _ = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+    #         std += torch.std(images)
+    #         mean += torch.mean(images)
+    #         count += 1
+    #     std = std / count
+    #     mean = mean / count
+    #     logger.info(f"Mean: {mean}, Std: {std}")
