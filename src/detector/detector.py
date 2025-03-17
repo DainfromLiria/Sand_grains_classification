@@ -26,19 +26,18 @@ logger = logging.getLogger(__name__)
 
 class MicroTextureDetector:
 
-    def __init__(self, mode: str, model_path: str = None):
+    def __init__(self, mode: str, experiment_uuid: str = None):
         """
         Initialize detector.
 
-        :param model_path: optional path to model weights. If None, use DeepLabV3_ResNet50_Weights.
+        :param experiment_uuid: uuid of existing experiment. If None, generate new uuid.
         :param mode: can be 'train', 'eval' and 'infer'. 'eval' is for run model on test dataset, but
         "infer" is for run model on completely new images from user (on production).
         """
         self.mode = mode
+        self.experiment_uuid: str = str(uuid.uuid4()) if self.mode == "train" else experiment_uuid
         if self.mode in ("train", "eval"):
-            self.experiment_uuid: str = str(uuid.uuid4())  # TODO make it instead of model_path
             self.run = self._init_neptune()
-        self.model_path = model_path
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
         self.model = self._create_model(
@@ -91,11 +90,14 @@ class MicroTextureDetector:
             model.encoder.load_state_dict(model_zoo.load_url(url, map_location=config.model.DEVICE))
 
         # load custom weights
-        if self.model_path is not None:
-            if not os.path.exists(self.model_path):
-                raise FileNotFoundError(f"File {self.model_path} does not exists!")
-            model.load_state_dict(torch.load(self.model_path, weights_only=True))
-            logger.info(f"Model weights loaded from {self.model_path}")
+        if self.experiment_uuid:
+            model_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid
+            if not model_path.exists():
+                raise FileNotFoundError(f"File {model_path} does not exists!")
+            model.load_state_dict(torch.load(model_path, weights_only=True))
+            logger.info(f"Model weights loaded from {model_path}")
+        elif self.mode in ("eval", "infer") and self.experiment_uuid is None:
+            raise Exception("experiment_uuid is None. For 'eval' and 'infer' mode experiment_uuid must be provided.")
 
         model.to(config.model.DEVICE)
         return model
@@ -137,8 +139,7 @@ class MicroTextureDetector:
         :return: path to results folder
         """
         # assemble name
-        folder_name: Path = Path(self.experiment_uuid)
-        results_folder_path: Path = config.paths.RESULTS_FOLDER / folder_name
+        results_folder_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid
         results_folder_path.mkdir(parents=False, exist_ok=False)
         logger.info(f"Results will be save into: {results_folder_path}")
         return results_folder_path
