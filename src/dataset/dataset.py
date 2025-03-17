@@ -88,7 +88,7 @@ class SandGrainsDataset(Dataset):
             coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][idx]
         # load image
         image_path: Path = self.img_path / Path(self._coco.loadImgs(coco_id)[0]['file_name'])
-        image: np.ndarray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+        image: np.ndarray = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
 
         # load annotations
         category_ids: List[int] = []
@@ -98,6 +98,7 @@ class SandGrainsDataset(Dataset):
         for ann in annotations:
             category_ids.append(ann['category_id'] - 1)
             mask = self._coco.annToMask(ann)
+            mask: np.ndarray = config.transform.MASK_TRANSFORMATION(image=mask)["image"]
             masks.append(mask)
 
         # apply image preprocessing transformations
@@ -107,6 +108,10 @@ class SandGrainsDataset(Dataset):
         if self.mode == "train":
             aug = config.transform.AUGMENTATIONS(image=image, masks=masks)
             image, masks = aug["image"], aug["masks"]
+
+        # cv2.imshow("img", image)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
 
         # convert and join masks into tensor
         size = (self.dataset_info["num_classes"], masks[0].shape[0], masks[0].shape[1])
