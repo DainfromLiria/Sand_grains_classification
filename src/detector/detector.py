@@ -297,19 +297,3 @@ class MicroTextureDetector:
     #         outputs = predict_morphological_feature(outputs)
     #     self.visualizer.make_prediction_visualisation(image, outputs[0].cpu().numpy(), img_predictions_folder_path)
     #
-    # def calculate_normalization_std_mean(self):
-    #     """
-    #     Calculate mean and std on train data for normalization.
-    #     Calculation speed depends on the batch size.
-    #     """
-    #     mean = 0
-    #     std = 0
-    #     count = 0
-    #     for images, masks in tqdm(self.train_loader, desc="Calculating std and mean"):
-    #         images, _ = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-    #         std += torch.std(images)
-    #         mean += torch.mean(images)
-    #         count += 1
-    #     std = std / count
-    #     mean = mean / count
-    #     logger.info(f"Mean: {mean}, Std: {std}")
