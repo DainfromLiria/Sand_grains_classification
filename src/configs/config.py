@@ -16,6 +16,8 @@ class Paths:
     PREDICTIONS_FOLDER.mkdir(parents=False, exist_ok=True)
     RESULTS_FOLDER: Path = ROOT / "results"
     RESULTS_FOLDER.mkdir(parents=False, exist_ok=True)
+    MODELS_FOLDER: Path = ROOT / "models"
+    MODELS_FOLDER.mkdir(parents=False, exist_ok=True)
 
     # train dataset path
     TRAIN_DATA: Path = DATA / "train"
@@ -58,11 +60,11 @@ class Transformations:
     IMAGE_TRANSFORMATIONS: A.Compose = A.Compose([
         A.CLAHE(p=1.0),
         A.Sharpen(p=1.0),
-        # A.Normalize(mean=NORMALIZATION_MEAN, std=NORMALIZATION_STD),
-        # A.Resize(height=520, width=520),
+        A.Normalize(p=1.0), # default mean and std is for ImageNet
+        # A.Resize(256, 256),
     ])
     MASK_TRANSFORMATION: A.Compose = A.Compose([
-        # A.Resize(height=520, width=520)
+        # A.Resize(256, 256),
     ])
 
 @dataclass
@@ -81,7 +83,7 @@ class DataConfig:
     # =====================================================================================
 
     # train validation split
-    TRAIN_SIZE: float = 0.9
+    TRAIN_SIZE: float = 0.8
     RANDOM_SEED: int = 42
 
 
@@ -89,14 +91,14 @@ class DataConfig:
 class Model:
     DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     AVAILABLE_MODELS: list = field(default_factory=lambda:['Unet', 'DeepLabV3Plus', 'Segformer'])
-    MODEL: str = 'Unet'
-    ENCODER: str = 'xception' # xception for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
+    MODEL: str = 'Segformer'
+    ENCODER: str = 'mit_b0' # xception for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
     # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
     ENCODER_WEIGHTS: str = "image-micronet"
     BATCH_SIZE: int = 5
     LEARNING_RATE: float = 1e-6
     EPOCH_COUNT: int = 300
-    THRESHOLD: float = 0.9
+    THRESHOLD: float = 0.5
     METRICS_COUNT: int = 3
 
     # Focal Loss configs
