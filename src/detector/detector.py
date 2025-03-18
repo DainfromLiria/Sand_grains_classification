@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import uuid
+from uuid import uuid4
 from pathlib import Path
 
 import neptune
@@ -35,7 +35,7 @@ class MicroTextureDetector:
         "infer" is for run model on completely new images from user (on production).
         """
         self.mode = mode
-        self.experiment_uuid: str = str(uuid.uuid4()) if self.mode == "train" else experiment_uuid
+        self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
         if self.mode in ("train", "eval"):
             self.run = self._init_neptune()
         logger.warning(f"Model run in {mode} mode!")
@@ -236,42 +236,45 @@ class MicroTextureDetector:
         avg_val_loss: float = running_cum_loss / len(self.val_dataset)
         self.run["val/epoch/loss"] = avg_val_loss
         # calculate epoch metrics
+        self.calculate_metrics(metrics_per_class, batch_count, prefix="val/epoch/metric")
+        return avg_val_loss
+
+    def evaluate_test_data(self) -> None:
+        """Evaluate test dataset."""
+        self.model.eval()  # set model in evaluation mode.
+        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, self.classes_count))
+        batch_count: int = 0
+        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
+            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+            with torch.no_grad():
+                outputs = self.model(images)
+            metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
+            # TODO make visualization on image
+            batch_count += 1
+        self.calculate_metrics(metrics_per_class, batch_count, prefix="test/metric")
+
+    def calculate_metrics(self, metrics_per_class: torch.Tensor, batch_count: int, prefix: str) -> None:
+        """
+        Calculate model evaluation metrics.
+
+        :param metrics_per_class: per class metrics in format [classes_count, metrics_count]
+        :param batch_count: batch count
+        :param prefix: metric prefix for neptune.
+        """
         avg_metrics_per_class: torch.Tensor = metrics_per_class / batch_count
         avg_metrics: torch.Tensor = torch.mean(avg_metrics_per_class, 1)
         logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
         # send data to neptune
-        self.run["val/epoch/metric/iou"].append(avg_metrics[0])
-        self.run["val/epoch/metric/recall"].append(avg_metrics[1])
-        self.run["val/epoch/metric/precision"].append(avg_metrics[2])
+        self.run[f"{prefix}/iou"].append(avg_metrics[0])
+        self.run[f"{prefix}/recall"].append(avg_metrics[1])
+        self.run[f"{prefix}/precision"].append(avg_metrics[2])
         for i in range(avg_metrics_per_class.shape[1]):
-            self.run[f"val/epoch/metric/{i}/iou"].append(avg_metrics_per_class[:, i][0])
-            self.run[f"val/epoch/metric/{i}/recall"].append(avg_metrics_per_class[:, i][1])
-            self.run[f"val/epoch/metric/{i}/precision"].append(avg_metrics_per_class[:, i][2])
-        return avg_val_loss
+            self.run[f"{prefix}/{i}/iou"].append(avg_metrics_per_class[:, i][0])
+            self.run[f"{prefix}/{i}/recall"].append(avg_metrics_per_class[:, i][1])
+            self.run[f"{prefix}/{i}/precision"].append(avg_metrics_per_class[:, i][2])
 
-    # def evaluate_test_data(self, results_folder_path: str) -> None:
-    #     """
-    #     Evaluate test dataset and save results (images with predictions) into results_folder_path.
-    #
-    #     :param results_folder_path: path to folder where images with predictions will be saved.
-    #     """
-    #     self.model.eval()  # set model in evaluation mode.
-    #     metrics = torch.zeros((self.METRICS_COUNT, self.classes_count))
-    #     batch_count = 0
-    #     for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
-    #         images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-    #         # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
-    #         with torch.no_grad():
-    #             outputs = self.model(images)
-    #         metrics += calculate_metrics(outputs, masks).to("cpu")
-    #         self.visualizer.make_test_images_prediction_visualisations(images, masks, outputs, results_folder_path)
-    #         batch_count += 1
-    #     # calculate metrics
-    #     avg_metrics_per_class = metrics / batch_count
-    #     print(f"Avg metrics: {torch.round(avg_metrics_per_class, decimal=4)}")
-    #     avg_metrics = torch.mean(avg_metrics_per_class, 1)
-    #     logger.info(f"[TEST] IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
-    #
+    # TODO method for prediction on completely new data
     # def predict(self, img_name: str) -> None:
     #     """
     #     Generate prediction for image.
