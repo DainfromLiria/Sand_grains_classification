@@ -90,7 +90,7 @@ class MicroTextureDetector:
             model.encoder.load_state_dict(model_zoo.load_url(url, map_location=config.model.DEVICE))
 
         # load custom weights
-        if self.experiment_uuid:
+        if self.experiment_uuid and self.mode != "train":
             model_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid
             if not model_path.exists():
                 raise FileNotFoundError(f"File {model_path} does not exists!")
