@@ -1,8 +1,8 @@
 import json
 import logging
 import os
-from uuid import uuid4
 from pathlib import Path
+from uuid import uuid4
 
 import neptune
 import segmentation_models_pytorch as smp
@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from neptune.integrations.python_logger import NeptuneHandler
 from pretrained_microscopy_models.util import get_pretrained_microscopynet_url
 from torch import nn
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -50,6 +51,12 @@ class MicroTextureDetector:
             self._load_data()
             if self.mode == "train":
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
+                self.scheduler = CosineAnnealingWarmRestarts(
+                    optimizer=self.optimizer,
+                    T_0=config.model.CA_T0,
+                    T_mult=config.model.CA_TMULT,
+                    eta_min=1e-8
+                )
                 self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder()
                 self._save_model_params()
@@ -206,6 +213,7 @@ class MicroTextureDetector:
             loss = self.loss_fn(outputs, masks)  # compute loss
             loss.backward()  # backward
             self.optimizer.step()  # step of input optimizer
+            self.scheduler.step()  # step of cosine scheduler
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
