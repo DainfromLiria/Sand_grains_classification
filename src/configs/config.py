@@ -96,7 +96,7 @@ class Model:
     # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
     ENCODER_WEIGHTS: str = "image-micronet"
     BATCH_SIZE: int = 5
-    LEARNING_RATE: float = 1e-6
+    LEARNING_RATE: float = 0.1 # or 0.01
     EPOCH_COUNT: int = 300
     THRESHOLD: float = 0.5
     METRICS_COUNT: int = 3
@@ -110,7 +110,13 @@ class Model:
     FT_BETA: float = 0.3
 
     # Early stopping config
-    PATIENCE: int = 70
+    PATIENCE: int = 100
+
+    # Cosine Annealing with Warm Restarts
+    # more about params:
+    # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingWarmRestarts.html
+    CA_T0: int = 30 # or 10
+    CA_TMULT: int = 1 # or 2
 
 
 @dataclass
