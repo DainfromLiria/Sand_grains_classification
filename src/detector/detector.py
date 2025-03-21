@@ -51,6 +51,7 @@ class MicroTextureDetector:
             self._load_data()
             if self.mode == "train":
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
+                self.scaler = torch.amp.GradScaler(device=config.model.DEVICE, enabled=config.model.USE_AMP)
                 self.scheduler = CosineAnnealingWarmRestarts(
                     optimizer=self.optimizer,
                     T_0=config.model.CA_T0,
@@ -209,10 +210,12 @@ class MicroTextureDetector:
         for images, masks in self.train_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             self.optimizer.zero_grad()  # reset the gradients for new batch
-            outputs = self.model(images)  # forward
-            loss = self.loss_fn(outputs, masks)  # compute loss
-            loss.backward()  # backward
-            self.optimizer.step()  # step of input optimizer
+            with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
+                outputs = self.model(images)  # forward
+                loss = self.loss_fn(outputs, masks)  # compute loss
+            self.scaler.scale(loss).backward() # backward
+            self.scaler.step(self.optimizer) # optimizer step
+            self.scaler.update()
             self.scheduler.step()  # step of cosine scheduler
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
@@ -235,8 +238,9 @@ class MicroTextureDetector:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                outputs = self.model(images)
-                loss = self.loss_fn(outputs, masks)
+                with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
+                    outputs = self.model(images)
+                    loss = self.loss_fn(outputs, masks)
             metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             running_cum_loss += loss.item() * images.shape[0]
             batch_count += 1
@@ -256,7 +260,8 @@ class MicroTextureDetector:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                outputs = self.model(images)
+                with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
+                    outputs = self.model(images)
             metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             # TODO make visualization on image
             batch_count += 1

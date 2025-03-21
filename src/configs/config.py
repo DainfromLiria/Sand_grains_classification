@@ -95,8 +95,8 @@ class Model:
     ENCODER: str = 'mit_b0' # xception for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
     # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
     ENCODER_WEIGHTS: str = "image-micronet"
-    BATCH_SIZE: int = 5
-    LEARNING_RATE: float = 0.1 # or 0.01
+    BATCH_SIZE: int = 5 # 16, 8
+    LEARNING_RATE: float = 0.1 # 0.01, 0.1, 0.5
     EPOCH_COUNT: int = 300
     THRESHOLD: float = 0.5
     METRICS_COUNT: int = 3
@@ -117,6 +117,9 @@ class Model:
     # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingWarmRestarts.html
     CA_T0: int = 30 # or 10
     CA_TMULT: int = 1 # or 2
+
+    # Mix precision
+    USE_AMP: bool = True
 
 
 @dataclass
