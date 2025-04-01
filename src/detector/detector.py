@@ -164,7 +164,7 @@ class MicroTextureDetector:
             "loss_function": self.loss_fn.__class__.__name__,
             "optimizer": self.optimizer.__class__.__name__,
             "patience": config.model.PATIENCE,
-            "use_patches": config.model.USE_PATIENCE,
+            "use_patches": config.model.USE_PATCHES,
             "patch_size": config.model.PATCH_SIZE,
             "overlap_rate": config.model.OVERLAP_RATE,
             "patch_stride": config.model.PATCH_STRIDE,
@@ -173,6 +173,7 @@ class MicroTextureDetector:
             "use_preprocessing": config.transform.USE_PREPROCESSING,
             # TODO add another params
         }
+        logger.info(f"MODEL PARAMETERS: {model_params}")
         self.run["params"] = model_params
         model_params_path: Path = self.results_folder_path / "model_params.json"
         with open(model_params_path, "w") as f:
