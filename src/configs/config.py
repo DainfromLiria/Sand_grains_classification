@@ -38,6 +38,7 @@ class Paths:
 @dataclass
 class Transformations:
     # augmentations
+    USE_AUGMENTATIONS: bool = False
     AUGMENTATIONS: A.Compose = A.Compose([
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
@@ -48,15 +49,15 @@ class Transformations:
     ])
 
     # test time augmentations
+    USE_TTA: bool = False
     TTA_AUGMENTATIONS: list = field(default_factory=lambda: [
         A.HorizontalFlip(p=1.0),
         A.VerticalFlip(p=1.0),
         A.Rotate(limit=(-45, 45), p=1.0)
     ])
 
-    # preprocessing transformations TODO explore and change
-    NORMALIZATION_MEAN: float = 68.451
-    NORMALIZATION_STD: float = 32.061
+    # preprocessing transformations
+    USE_PREPROCESSING: bool = False
     IMAGE_TRANSFORMATIONS: A.Compose = A.Compose([
         A.CLAHE(p=1.0),
         A.Sharpen(p=1.0),
@@ -74,13 +75,7 @@ class DataConfig:
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
     MAX_PIXEL_VALUE: int = 255
-    CLASSES_COUNT: int = 19 # TODO change to actual number of classes
-
-    # =====================================================================================
-    # TODO update for new dataset !!!!
-    RELIEF_IDX = [4, 5, 12]
-    SHAPE_IDX = [6, 11, 14, 17]
-    # =====================================================================================
+    CLASSES_COUNT: int = 5
 
     # train validation split
     TRAIN_SIZE: float = 0.8
@@ -92,11 +87,11 @@ class Model:
     DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     AVAILABLE_MODELS: list = field(default_factory=lambda:['Unet', 'DeepLabV3Plus', 'Segformer'])
     MODEL: str = 'Segformer'
-    ENCODER: str = 'mit_b0' # xception for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
+    ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
     # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
-    ENCODER_WEIGHTS: str = "image-micronet"
+    ENCODER_WEIGHTS: str = "imagenet" # for mit_b[1-5] available only imagenet, for other image-micronet
     BATCH_SIZE: int = 5 # 16, 8
-    LEARNING_RATE: float = 0.1 # 0.01, 0.1, 0.5
+    LEARNING_RATE: float = 0.01 # 0.01, 0.1, 0.5
     EPOCH_COUNT: int = 300
     THRESHOLD: float = 0.5
     METRICS_COUNT: int = 3
@@ -120,6 +115,12 @@ class Model:
 
     # Mix precision
     USE_AMP: bool = True
+
+    # Overlapping patches
+    USE_PATCHES: bool = False
+    PATCH_SIZE: int = 224 # imagenet pretrained encoder's input size. But try 512?
+    OVERLAP_RATE: float = 0.5 # half of PATCH_SIZE # try 0.6 or 0.7
+    PATCH_STRIDE: int = int(PATCH_SIZE * (1 - OVERLAP_RATE))
 
 
 @dataclass

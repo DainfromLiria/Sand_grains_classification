@@ -20,7 +20,6 @@ from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_metrics
 from metrics.loss import FocalTverskyLoss
-from utils import predict_morphological_feature
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +164,13 @@ class MicroTextureDetector:
             "loss_function": self.loss_fn.__class__.__name__,
             "optimizer": self.optimizer.__class__.__name__,
             "patience": config.model.PATIENCE,
+            "use_patches": config.model.USE_PATIENCE,
+            "patch_size": config.model.PATCH_SIZE,
+            "overlap_rate": config.model.OVERLAP_RATE,
+            "patch_stride": config.model.PATCH_STRIDE,
+            "use_amp": config.model.USE_AMP,
+            "use_augmentations": config.transform.USE_AUGMENTATIONS,
+            "use_preprocessing": config.transform.USE_PREPROCESSING,
             # TODO add another params
         }
         self.run["params"] = model_params
@@ -217,6 +223,9 @@ class MicroTextureDetector:
             self.scaler.step(self.optimizer) # optimizer step
             self.scaler.update()
             self.scheduler.step()  # step of cosine scheduler
+
+            lr = self.scheduler.get_last_lr()[0]
+            self.run['train/epoch/lr'].append(lr)
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]

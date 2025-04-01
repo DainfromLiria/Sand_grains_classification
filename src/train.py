@@ -1,12 +1,18 @@
-import os
-from dotenv import load_dotenv
+import torch
 
+from configs import config
+# from dataset import SandGrainsDataset
+from detector import MicroTextureDetector
+from utils.logging import setup_logging
 
-# ENV variables
-load_dotenv()
-NEPTUNE_PROJECT=os.getenv("NEPTUNE_PROJECT")
-NEPTUNE_API_KEY=os.getenv("NEPTUNE_API_KEY")
-
+# from torch.utils.data import DataLoader
 
 if __name__ == '__main__':
-    print(NEPTUNE_PROJECT)
+    setup_logging()
+    torch.hub.set_dir(config.paths.MODELS_FOLDER)  # TODO move to some setup file
+
+    # dataset = SandGrainsDataset(mode="val")
+    # img = dataset[0]
+    #
+    det = MicroTextureDetector(mode="train")
+    det.train()

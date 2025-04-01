@@ -3,7 +3,6 @@ import logging
 import torch
 
 from configs import config
-from utils import predict_morphological_feature
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,6 @@ def calculate_metrics(outputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
     # convert probabilities into labels
     outputs = torch.sigmoid(outputs)
     outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
-    outputs = predict_morphological_feature(outputs)
 
     tp, fp, fn, tn = confusion_matrix(outputs=outputs, targets=targets)
 

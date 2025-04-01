@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -11,6 +12,7 @@ from pycocotools.coco import COCO
 from torch.utils.data import Dataset
 
 from configs import config
+from utils import calculate_patch_positions, get_patch_by_position
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +40,19 @@ class SandGrainsDataset(Dataset):
         self.dataset_info: Dict[str, Any] = {}
         self._load_dataset_info()
 
+        # self.calculate_counts_per_class()
+
+        # patches
+        if config.model.USE_PATCHES:
+            self.positions: list = calculate_patch_positions()
+            self.patches_count: int = len(self.positions)
+
     def __len__(self) -> int:
         if self.mode == "eval":
-            return len(self._coco.getImgIds())
-        return self.dataset_info["train_size"] if self.mode == "train" else self.dataset_info["val_size"]
+            ln: int = len(self._coco.getImgIds())
+        else:
+            ln: int = self.dataset_info["train_size"] if self.mode == "train" else self.dataset_info["val_size"]
+        return ln * self.patches_count if config.model.USE_PATCHES else ln
 
     def _load_dataset_info(self) -> None:
         """Load information about the training dataset."""
@@ -75,6 +86,18 @@ class SandGrainsDataset(Dataset):
         self.dataset_info["num_classes"] = len(self.dataset_info["classes"])
         self.dataset_info["img_count"] = len(self._coco.getImgIds())
 
+    def calculate_counts_per_class(self) -> None:
+        """Calculate count of microtextures in train/val dataset per class"""
+        category_ids: dict = defaultdict(int)
+        ln: int = self.dataset_info["train_size"] if self.mode == "train" else self.dataset_info["val_size"]
+        for i in range(0, ln):
+            coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][i]
+            ann_ids = self._coco.getAnnIds(imgIds=coco_id)
+            annotations = self._coco.loadAnns(ann_ids)
+            for ann in annotations:
+                category_ids[ann['category_id'] - 1] += 1
+        print(f"Stats: {category_ids}")
+
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Load one image with masks from memory by index.
@@ -83,12 +106,18 @@ class SandGrainsDataset(Dataset):
 
         :return: two tensors, where first is image and second is mask.
         """
-        coco_id: int = idx + 1 # coco indexes starts from 1
+        img_idx = idx
+        if config.model.USE_PATCHES: # TODO skip empty masks
+            img_idx = idx // self.patches_count
+            idx = idx % self.patches_count
+        coco_id: int = img_idx + 1 # coco indexes starts from 1
         if self.mode != "eval":
-            coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][idx]
+            coco_id = self.dataset_info["train_idx" if self.mode == "train" else "val_idx"][img_idx]
         # load image
         image_path: Path = self.img_path / Path(self._coco.loadImgs(coco_id)[0]['file_name'])
         image: np.ndarray = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if config.model.USE_PATCHES:
+            image = get_patch_by_position(img=image, pos=self.positions[idx])
 
         # load annotations
         category_ids: List[int] = []
@@ -98,14 +127,18 @@ class SandGrainsDataset(Dataset):
         for ann in annotations:
             category_ids.append(ann['category_id'] - 1)
             mask = self._coco.annToMask(ann)
-            mask: np.ndarray = config.transform.MASK_TRANSFORMATION(image=mask)["image"]
+            if config.transform.USE_PREPROCESSING:
+                mask: np.ndarray = config.transform.MASK_TRANSFORMATION(image=mask)["image"]
+            if config.model.USE_PATCHES:
+                mask = get_patch_by_position(img=mask, pos=self.positions[idx])
             masks.append(mask)
 
         # apply image preprocessing transformations
-        image: torch.Tensor = config.transform.IMAGE_TRANSFORMATIONS(image=image)["image"]
+        if config.transform.USE_PREPROCESSING:
+            image: torch.Tensor = config.transform.IMAGE_TRANSFORMATIONS(image=image)["image"]
 
         # apply augmentations
-        if self.mode == "train":
+        if self.mode == "train" and config.transform.USE_AUGMENTATIONS:
             aug = config.transform.AUGMENTATIONS(image=image, masks=masks)
             image, masks = aug["image"], aug["masks"]
 
