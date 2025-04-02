@@ -71,11 +71,11 @@ class Transformations:
 @dataclass
 class DataConfig:
 
-    # image properties # TODO find usage
+    # image properties
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
     MAX_PIXEL_VALUE: int = 255
-    CLASSES_COUNT: int = 5
+    CLASSES_COUNT: int = 5 # 5 - mechanical(3) and chemical(2); 7 - relief(3) and shape(4)
 
     # train validation split
     TRAIN_SIZE: float = 0.8
@@ -84,15 +84,16 @@ class DataConfig:
 
 @dataclass
 class Model:
-    DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # Main
+    DEVICE: str = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     AVAILABLE_MODELS: list = field(default_factory=lambda:['Unet', 'DeepLabV3Plus', 'Segformer'])
     MODEL: str = 'Segformer'
-    ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit-b0 (or other b) for Segformer
-    # used this because it is the best by paper. For Segformer micronet isn't available, so use "imagenet"
+    ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit_b0 (or other b) for Segformer
     ENCODER_WEIGHTS: str = "imagenet" # for mit_b[1-5] available only imagenet, for other image-micronet
-    BATCH_SIZE: int = 5 # 16, 8
-    LEARNING_RATE: float = 0.01 # 0.01, 0.1, 0.5
-    EPOCH_COUNT: int = 300
+    BATCH_SIZE: int = 8 # 16, 8
+    LEARNING_RATE: float = 0.0001 # 0.001, 0.0001
+
+    # Metrics and activation function
     THRESHOLD: float = 0.5
     METRICS_COUNT: int = 3
 
@@ -104,20 +105,19 @@ class Model:
     FT_ALPHA: float = 0.7
     FT_BETA: float = 0.3
 
-    # Early stopping config
-    PATIENCE: int = 100
+    # Epochs
+    EPOCH_COUNT: int = 300
+    PATIENCE: int = 100 # early stopping
 
     # Cosine Annealing with Warm Restarts
     # more about params:
     # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingWarmRestarts.html
+    USE_CA: bool = True
     CA_T0: int = 30 # or 10
     CA_TMULT: int = 1 # or 2
 
-    # Mix precision
-    USE_AMP: bool = True
-
     # Overlapping patches
-    USE_PATCHES: bool = False
+    USE_PATCHES: bool = True
     PATCH_SIZE: int = 224 # imagenet pretrained encoder's input size. But try 512?
     OVERLAP_RATE: float = 0.5 # half of PATCH_SIZE # try 0.6 or 0.7
     PATCH_STRIDE: int = int(PATCH_SIZE * (1 - OVERLAP_RATE))
