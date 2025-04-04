@@ -12,9 +12,9 @@ def get_padding_height_and_width() -> Tuple[int, int]:
     w_mod = width % config.model.PATCH_STRIDE
     p_h: int = 0
     p_w: int = 0
-    if h_mod > 0:
+    if h_mod >= 0:
         p_h = ((height - h_mod) + config.model.PATCH_SIZE) - height
-    if w_mod > 0:
+    if w_mod >= 0:
         p_w = ((width - w_mod) + config.model.PATCH_SIZE) - width
     return p_h, p_w
 
