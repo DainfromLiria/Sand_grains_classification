@@ -40,7 +40,7 @@ class SandGrainsDataset(Dataset):
         self.dataset_info: Dict[str, Any] = {}
         self._load_dataset_info()
 
-        # self.calculate_counts_per_class()
+        self.calculate_counts_per_class()
 
         # patches
         if config.model.USE_PATCHES:
@@ -96,7 +96,7 @@ class SandGrainsDataset(Dataset):
             annotations = self._coco.loadAnns(ann_ids)
             for ann in annotations:
                 category_ids[ann['category_id'] - 1] += 1
-        print(f"Stats: {category_ids}")
+        logger.warning(f"Stats in mode {self.mode}: {category_ids}")
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -153,7 +153,5 @@ class SandGrainsDataset(Dataset):
             tensor_masks[c_idx, :, :] = tensor_masks[c_idx, :, :] | torch.tensor(masks[i], dtype=torch.uint8)
 
         # convert image to torch.Tensor
-        if image.ndim < 3:
-            image: np.ndarray = np.expand_dims(image, 2) # for grayscale (mono channel image)
         image: torch.Tensor = torch.from_numpy(image.transpose(2, 0, 1))
         return image, tensor_masks
