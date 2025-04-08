@@ -142,10 +142,6 @@ class SandGrainsDataset(Dataset):
             aug = config.transform.AUGMENTATIONS(image=image, masks=masks)
             image, masks = aug["image"], aug["masks"]
 
-        # cv2.imshow("img", image)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
-
         # convert and join masks into tensor
         size = (self.dataset_info["num_classes"], masks[0].shape[0], masks[0].shape[1])
         tensor_masks: torch.Tensor = torch.zeros(size=size, dtype=torch.uint8)
