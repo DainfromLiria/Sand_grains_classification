@@ -40,7 +40,8 @@ class SandGrainsDataset(Dataset):
         self.dataset_info: Dict[str, Any] = {}
         self._load_dataset_info()
 
-        self.calculate_counts_per_class()
+        if self.mode in ("train", "val"):
+            self.calculate_counts_per_class()
 
         # patches
         if config.model.USE_PATCHES:
@@ -107,7 +108,7 @@ class SandGrainsDataset(Dataset):
         :return: two tensors, where first is image and second is mask.
         """
         img_idx = idx
-        if config.model.USE_PATCHES: # TODO skip empty masks
+        if config.model.USE_PATCHES:
             img_idx = idx // self.patches_count
             idx = idx % self.patches_count
         coco_id: int = img_idx + 1 # coco indexes starts from 1
