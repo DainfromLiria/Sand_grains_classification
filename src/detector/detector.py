@@ -19,7 +19,7 @@ from tqdm import tqdm
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_metrics
-from metrics.loss import FocalTverskyLoss
+from metrics.loss import FocalTverskyLoss, FocalLoss
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class MicroTextureDetector:
         """
         self.mode = mode
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
-        if self.mode in ("train", "eval"):
+        if self.mode == "train":
             self.run = self._init_neptune()
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
@@ -50,18 +50,19 @@ class MicroTextureDetector:
             self._load_data()
             if self.mode == "train":
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
-                self.scaler = torch.amp.GradScaler(device=config.model.DEVICE, enabled=config.model.USE_AMP)
-                self.scheduler = CosineAnnealingWarmRestarts(
-                    optimizer=self.optimizer,
-                    T_0=config.model.CA_T0,
-                    T_mult=config.model.CA_TMULT,
-                    eta_min=1e-8
-                )
-                self.loss_fn = FocalTverskyLoss()
+                if config.model.USE_CA:
+                    self.scheduler = CosineAnnealingWarmRestarts(
+                        optimizer=self.optimizer,
+                        T_0=config.model.CA_T0,
+                        T_mult=config.model.CA_TMULT,
+                        eta_min=1e-8
+                    )
+                # self.loss_fn = nn.BCEWithLogitsLoss(weight=torch.tensor(0.25))
+                self.loss_fn = FocalLoss()
+                # self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder()
                 self._save_model_params()
 
-    # TODO check input image size for encoder backbone
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
         Returns segmentation model with the specified encoder backbone.
@@ -98,10 +99,10 @@ class MicroTextureDetector:
 
         # load custom weights
         if self.experiment_uuid and self.mode != "train":
-            model_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid
+            model_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid / "model.pt"
             if not model_path.exists():
                 raise FileNotFoundError(f"File {model_path} does not exists!")
-            model.load_state_dict(torch.load(model_path, weights_only=True))
+            model.load_state_dict(torch.load(model_path, weights_only=True, map_location=config.model.DEVICE))
             logger.info(f"Model weights loaded from {model_path}")
         elif self.mode in ("eval", "infer") and self.experiment_uuid is None:
             raise Exception("experiment_uuid is None. For 'eval' and 'infer' mode experiment_uuid must be provided.")
@@ -118,12 +119,13 @@ class MicroTextureDetector:
             logger.info(f"Train dataset size: {len(self.train_dataset)}")
             self.val_dataset = SandGrainsDataset(mode="val")
             logger.info(f"Val dataset size: {len(self.val_dataset)}")
-            self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
-            self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+            shuffle: bool = False if config.model.USE_PATCHES else True
+            self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=shuffle)
+            self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=False)
         elif self.mode == "eval":
             self.test_dataset = SandGrainsDataset(mode="eval")
             logger.info(f"Test dataset size: {len(self.test_dataset)}")
-            self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
+            self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=False)
         logger.info(f"Batch size: {config.model.BATCH_SIZE}")
 
     def _init_neptune(self) -> neptune.Run:
@@ -168,9 +170,13 @@ class MicroTextureDetector:
             "patch_size": config.model.PATCH_SIZE,
             "overlap_rate": config.model.OVERLAP_RATE,
             "patch_stride": config.model.PATCH_STRIDE,
-            "use_amp": config.model.USE_AMP,
             "use_augmentations": config.transform.USE_AUGMENTATIONS,
             "use_preprocessing": config.transform.USE_PREPROCESSING,
+            "use_ca": config.model.USE_CA,
+            "ca_t0": config.model.CA_T0,
+            "ca_tmult": config.model.CA_TMULT,
+            "classes_count": config.data.CLASSES_COUNT,
+            "use_clipping": config.model.USE_CLIPPING,
             # TODO add another params
         }
         logger.info(f"MODEL PARAMETERS: {model_params}")
@@ -186,7 +192,7 @@ class MicroTextureDetector:
         for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
             logger.info(f"EPOCH {epoch}")
             train_loss = self._train_one_epoch()
-            val_loss = self._validate_one_epoch()
+            val_loss, val_iou = self._validate_one_epoch()
             logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
 
             if val_loss is torch.nan or train_loss is torch.nan:
@@ -194,12 +200,14 @@ class MicroTextureDetector:
 
             # early stopping
             if val_loss < best_loss:
+                self.run["best_val_iou"] = val_iou
+                self.run["best_val_loss"] = val_loss
                 best_loss = val_loss
                 patience = config.model.PATIENCE
                 model_path: Path = self.results_folder_path / "model.pt"
                 torch.save(self.model.state_dict(), model_path)
                 self.run["model/checkpoints"].upload(str(model_path))
-                logger.info("Best model saved")
+                logger.warning("Best model saved")
             else:
                 patience -= 1
                 if patience <= 0:
@@ -217,16 +225,19 @@ class MicroTextureDetector:
         for images, masks in self.train_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             self.optimizer.zero_grad()  # reset the gradients for new batch
-            with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
-                outputs = self.model(images)  # forward
-                loss = self.loss_fn(outputs, masks)  # compute loss
-            self.scaler.scale(loss).backward() # backward
-            self.scaler.step(self.optimizer) # optimizer step
-            self.scaler.update()
-            self.scheduler.step()  # step of cosine scheduler
+            outputs = self.model(images)  # forward
+            loss = self.loss_fn(outputs, masks)  # compute loss
+            loss.backward()  # backward
 
-            lr = self.scheduler.get_last_lr()[0]
-            self.run['train/epoch/lr'].append(lr)
+            if config.model.USE_CLIPPING:
+                nn.utils.clip_grad_value_(self.model.parameters(), clip_value=1.0) # Gradient Value Clipping
+
+            self.optimizer.step()  # step of input optimizer
+
+            if config.model.USE_CA:
+                self.scheduler.step()  # step of cosine scheduler
+                lr = self.scheduler.get_last_lr()[0]
+                self.run['train/epoch/lr'].append(lr)
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
@@ -234,7 +245,7 @@ class MicroTextureDetector:
         self.run["train/epoch/loss"].append(avg_train_loss)
         return avg_train_loss
 
-    def _validate_one_epoch(self) -> float:
+    def _validate_one_epoch(self) -> (float, torch.Tensor):
         """
         Calculate loss and metrics on validation dataset.
 
@@ -248,54 +259,56 @@ class MicroTextureDetector:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
-                    outputs = self.model(images)
-                    loss = self.loss_fn(outputs, masks)
+                outputs = self.model(images)
+                loss = self.loss_fn(outputs, masks)
             metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             running_cum_loss += loss.item() * images.shape[0]
             batch_count += 1
         # calculate epoch loss
         avg_val_loss: float = running_cum_loss / len(self.val_dataset)
-        self.run["val/epoch/loss"] = avg_val_loss
+        self.run["val/epoch/loss"].append(avg_val_loss)
         # calculate epoch metrics
-        self.calculate_metrics(metrics_per_class, batch_count, prefix="val/epoch/metric")
-        return avg_val_loss
+        iou = self.calculate_metrics(metrics_per_class, batch_count, prefix="val/epoch/metric")
+        return avg_val_loss, iou
 
     def evaluate_test_data(self) -> None:
         """Evaluate test dataset."""
         self.model.eval()  # set model in evaluation mode.
-        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, self.classes_count))
+        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, config.data.CLASSES_COUNT))
         batch_count: int = 0
         for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
-                with torch.autocast(device_type=str(config.model.DEVICE), dtype=torch.bfloat16, enabled=config.model.USE_AMP):
-                    outputs = self.model(images)
+                outputs = self.model(images)
             metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
             # TODO make visualization on image
             batch_count += 1
         self.calculate_metrics(metrics_per_class, batch_count, prefix="test/metric")
 
-    def calculate_metrics(self, metrics_per_class: torch.Tensor, batch_count: int, prefix: str) -> None:
+    def calculate_metrics(self, metrics_per_class: torch.Tensor, batch_count: int, prefix: str) -> torch.Tensor:
         """
         Calculate model evaluation metrics.
 
         :param metrics_per_class: per class metrics in format [classes_count, metrics_count]
         :param batch_count: batch count
         :param prefix: metric prefix for neptune.
+
+        :return: mean IOU across all classes.
         """
         avg_metrics_per_class: torch.Tensor = metrics_per_class / batch_count
         avg_metrics: torch.Tensor = torch.mean(avg_metrics_per_class, 1)
         logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
         # send data to neptune
-        self.run[f"{prefix}/iou"].append(avg_metrics[0])
-        self.run[f"{prefix}/recall"].append(avg_metrics[1])
-        self.run[f"{prefix}/precision"].append(avg_metrics[2])
-        for i in range(avg_metrics_per_class.shape[1]):
-            self.run[f"{prefix}/{i}/iou"].append(avg_metrics_per_class[:, i][0])
-            self.run[f"{prefix}/{i}/recall"].append(avg_metrics_per_class[:, i][1])
-            self.run[f"{prefix}/{i}/precision"].append(avg_metrics_per_class[:, i][2])
+        if self.mode == "train":
+            self.run[f"{prefix}/iou"].append(avg_metrics[0])
+            self.run[f"{prefix}/recall"].append(avg_metrics[1])
+            self.run[f"{prefix}/precision"].append(avg_metrics[2])
+            for i in range(avg_metrics_per_class.shape[1]):
+                self.run[f"{prefix}/{i}/iou"].append(avg_metrics_per_class[:, i][0])
+                self.run[f"{prefix}/{i}/recall"].append(avg_metrics_per_class[:, i][1])
+                self.run[f"{prefix}/{i}/precision"].append(avg_metrics_per_class[:, i][2])
+        return avg_metrics[0]
 
     # TODO method for prediction on completely new data
     # def predict(self, img_name: str) -> None:
