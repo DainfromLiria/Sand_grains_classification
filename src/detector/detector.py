@@ -32,12 +32,12 @@ class MicroTextureDetector:
         Initialize detector.
 
         :param experiment_uuid: uuid of existing experiment. If None, generate new uuid.
-        :param mode: can be 'train', 'eval' and 'infer'. 'eval' is for run model on test dataset, but
+        :param mode: can be 'train', 'val', 'eval' and 'infer'. 'eval' is for run model on test dataset, but
         "infer" is for run model on completely new images from user.
         """
         self.mode = mode
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
-        if self.mode == "train":
+        if self.mode in ("train", "val"):
             self.run = self._init_neptune()
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
@@ -47,9 +47,9 @@ class MicroTextureDetector:
             encoder_weights=config.model.ENCODER_WEIGHTS
         )
 
-        if self.mode in ("train", "eval"):
+        if self.mode in ("train", "val", "eval"):
             self._load_data()
-            if self.mode == "train":
+            if self.mode in ("train", "val"):
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
                 if config.model.USE_CA:
                     self.scheduler = CosineAnnealingWarmRestarts(
@@ -105,7 +105,7 @@ class MicroTextureDetector:
                 raise FileNotFoundError(f"File {model_path} does not exists!")
             model.load_state_dict(torch.load(model_path, weights_only=True, map_location=config.model.DEVICE))
             logger.info(f"Model weights loaded from {model_path}")
-        elif self.mode in ("eval", "infer") and self.experiment_uuid is None:
+        elif self.mode in ("val", "eval", "infer") and self.experiment_uuid is None:
             raise Exception("experiment_uuid is None. For 'eval' and 'infer' mode experiment_uuid must be provided.")
 
         model.to(config.model.DEVICE)
@@ -113,7 +113,7 @@ class MicroTextureDetector:
 
     def _load_data(self) -> None:
         """Load train, validation and test datasets and create DataLoaders."""
-        if self.mode == "train":
+        if self.mode in ("train", "val"):
             self.train_dataset = SandGrainsDataset(mode="train")
             self.classes_count = self.train_dataset.dataset_info["num_classes"]
             logger.info(f"Dataset classes count: {self.classes_count}")
@@ -245,6 +245,18 @@ class MicroTextureDetector:
         avg_train_loss = running_cum_loss / len(self.train_dataset)
         self.run["train/epoch/loss"].append(avg_train_loss)
         return avg_train_loss
+
+    def validate(self) -> None:
+        """Validate model."""
+        val_loss, val_iou = self._validate_one_epoch()
+        logger.info(f"VALIDATION loss: {val_loss}")
+
+        if val_loss is torch.nan:
+            raise Exception("Loss is nan!!!")
+
+        self.run["best_val_iou"] = val_iou
+        self.run["best_val_loss"] = val_loss
+        self.run.stop()
 
     def _validate_one_epoch(self) -> (float, torch.Tensor):
         """
