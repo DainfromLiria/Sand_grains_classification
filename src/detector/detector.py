@@ -18,8 +18,9 @@ from tqdm import tqdm
 
 from configs import config
 from dataset import SandGrainsDataset
-from metrics import calculate_metrics
-from metrics.loss import FocalTverskyLoss, FocalLoss
+from metrics import calculate_confusion_matrix
+from metrics.loss import FocalLoss, FocalTverskyLoss
+from utils import visualize_nn_prediction, calculate_patch_positions, join_and_visualize_patches
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class MicroTextureDetector:
 
         :param experiment_uuid: uuid of existing experiment. If None, generate new uuid.
         :param mode: can be 'train', 'eval' and 'infer'. 'eval' is for run model on test dataset, but
-        "infer" is for run model on completely new images from user (on production).
+        "infer" is for run model on completely new images from user.
         """
         self.mode = mode
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
@@ -57,8 +58,8 @@ class MicroTextureDetector:
                         T_mult=config.model.CA_TMULT,
                         eta_min=1e-8
                     )
-                # self.loss_fn = nn.BCEWithLogitsLoss(weight=torch.tensor(0.25))
-                self.loss_fn = FocalLoss()
+                self.loss_fn = nn.BCEWithLogitsLoss(weight=torch.tensor(0.25))
+                # self.loss_fn = FocalLoss()
                 # self.loss_fn = FocalTverskyLoss()
                 self.results_folder_path = self._make_results_folder()
                 self._save_model_params()
@@ -253,62 +254,78 @@ class MicroTextureDetector:
         """
         self.model.eval()  # set model in evaluation mode.
         running_cum_loss = 0.0
-        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, self.classes_count))
-        batch_count = 0
+        confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
         for images, masks in self.val_loader:
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
                 outputs = self.model(images)
                 loss = self.loss_fn(outputs, masks)
-            metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
+            confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
             running_cum_loss += loss.item() * images.shape[0]
-            batch_count += 1
         # calculate epoch loss
         avg_val_loss: float = running_cum_loss / len(self.val_dataset)
         self.run["val/epoch/loss"].append(avg_val_loss)
         # calculate epoch metrics
-        iou = self.calculate_metrics(metrics_per_class, batch_count, prefix="val/epoch/metric")
+        iou = self.calculate_metrics(confusion_matrix, prefix="val/epoch/metric")
         return avg_val_loss, iou
 
     def evaluate_test_data(self) -> None:
-        """Evaluate test dataset."""
+        """Evaluate test dataset. USE BATCH SIZE ONE!"""
         self.model.eval()  # set model in evaluation mode.
-        metrics_per_class = torch.zeros((config.model.METRICS_COUNT, config.data.CLASSES_COUNT))
-        batch_count: int = 0
+        confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
+
+        patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        patches_count: int = len(calculate_patch_positions())
+        print("Patches count:", patches_count)
         for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
             with torch.no_grad():
                 outputs = self.model(images)
-            metrics_per_class += calculate_metrics(outputs, masks).to("cpu")
-            # TODO make visualization on image
-            batch_count += 1
-        self.calculate_metrics(metrics_per_class, batch_count, prefix="test/metric")
 
-    def calculate_metrics(self, metrics_per_class: torch.Tensor, batch_count: int, prefix: str) -> torch.Tensor:
+            # outputs_for_viz = torch.sigmoid(outputs)
+            # outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
+            # for i in range(config.model.BATCH_SIZE):
+            #     patches.append((images[i], masks[i], outputs_for_viz[i]))
+            #     if len(patches) == patches_count:
+            #         join_and_visualize_patches(patches)
+            #         patches = []
+
+
+            confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
+        self.calculate_metrics(confusion_matrix, prefix="test/metric")
+
+    def calculate_metrics(self, confusion_matrix: torch.Tensor, prefix: str) -> torch.Tensor:
         """
         Calculate model evaluation metrics.
 
-        :param metrics_per_class: per class metrics in format [classes_count, metrics_count]
-        :param batch_count: batch count
+        :param confusion_matrix: per class TP, FP and FN in format [3, classes_count]
         :param prefix: metric prefix for neptune.
 
         :return: mean IOU across all classes.
         """
-        avg_metrics_per_class: torch.Tensor = metrics_per_class / batch_count
-        avg_metrics: torch.Tensor = torch.mean(avg_metrics_per_class, 1)
-        logger.info(f"IOU: {avg_metrics[0]}   Recall: {avg_metrics[1]}   Precision: {avg_metrics[2]}")
+        eps: float = config.model.EPS
+        tp, fp, fn = confusion_matrix[0], confusion_matrix[1], confusion_matrix[2]
+        # per class
+        precision_per_class = torch.squeeze((tp + eps) / (tp + fp + eps))
+        recall_per_class = torch.squeeze((tp + eps) / (tp + fn + eps))
+        iou_per_class = torch.squeeze((tp + eps) / (tp + fp + fn + eps))
+        # avg
+        avg_iou = torch.mean(iou_per_class)
+        avg_recall = torch.mean(recall_per_class)
+        avg_precision = torch.mean(precision_per_class)
+        logger.info(f"IOU: {avg_iou}   Recall: {avg_recall}   Precision: {avg_precision}")
         # send data to neptune
         if self.mode == "train":
-            self.run[f"{prefix}/iou"].append(avg_metrics[0])
-            self.run[f"{prefix}/recall"].append(avg_metrics[1])
-            self.run[f"{prefix}/precision"].append(avg_metrics[2])
-            for i in range(avg_metrics_per_class.shape[1]):
-                self.run[f"{prefix}/{i}/iou"].append(avg_metrics_per_class[:, i][0])
-                self.run[f"{prefix}/{i}/recall"].append(avg_metrics_per_class[:, i][1])
-                self.run[f"{prefix}/{i}/precision"].append(avg_metrics_per_class[:, i][2])
-        return avg_metrics[0]
+            self.run[f"{prefix}/iou"].append(avg_iou)
+            self.run[f"{prefix}/recall"].append(avg_recall)
+            self.run[f"{prefix}/precision"].append(avg_precision)
+            for i in range(confusion_matrix.shape[1]):
+                self.run[f"{prefix}/{i}/iou"].append(iou_per_class[i])
+                self.run[f"{prefix}/{i}/recall"].append(recall_per_class[i])
+                self.run[f"{prefix}/{i}/precision"].append(precision_per_class[i])
+        return avg_iou
 
     # TODO method for prediction on completely new data
     # def predict(self, img_name: str) -> None:

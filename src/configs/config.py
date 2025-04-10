@@ -62,10 +62,10 @@ class Transformations:
         A.CLAHE(p=1.0),
         A.Sharpen(p=1.0),
         A.Normalize(p=1.0), # default mean and std is for ImageNet
-        # A.Resize(256, 256),
+        # A.Resize(512, 512),
     ])
     MASK_TRANSFORMATION: A.Compose = A.Compose([
-        # A.Resize(256, 256),
+        # A.Resize(512, 512),
     ])
 
 @dataclass
@@ -91,13 +91,16 @@ class Model:
     ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit_b0 (or other b) for Segformer
     ENCODER_WEIGHTS: str = "imagenet" # for mit_b[1-5] available only imagenet, for other image-micronet
     BATCH_SIZE: int = 8 # 16, 8
-    LEARNING_RATE: float = 0.0001 # 0.001, 0.0001
+    LEARNING_RATE: float = 0.0001 # 0.0001, 0.00001
+    USE_CLIPPING: bool = False
 
     # Metrics and activation function
     THRESHOLD: float = 0.5
-    METRICS_COUNT: int = 3
+    CONF_MAT_SIZE: int = 3
+    EPS: float = 1e-6
 
     # Focal Loss configs
+    F_ALPHA: float = 0.25
     F_GAMMA: float = 2.0  # by official paper "we found γ = 2 to work best in our experiments"
 
     # Focal Tversky Loss configs. All values were best in original paper.
@@ -112,13 +115,13 @@ class Model:
     # Cosine Annealing with Warm Restarts
     # more about params:
     # https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingWarmRestarts.html
-    USE_CA: bool = True
-    CA_T0: int = 30 # or 10
-    CA_TMULT: int = 1 # or 2
+    USE_CA: bool = False
+    CA_T0: int = 10 # or 10
+    CA_TMULT: int = 2 # or 2
 
     # Overlapping patches
-    USE_PATCHES: bool = True
-    PATCH_SIZE: int = 224 # imagenet pretrained encoder's input size. But try 512?
+    USE_PATCHES: bool = False
+    PATCH_SIZE: int = 512 # imagenet pretrained encoder's input size. But try 512?
     OVERLAP_RATE: float = 0.5 # half of PATCH_SIZE # try 0.6 or 0.7
     PATCH_STRIDE: int = int(PATCH_SIZE * (1 - OVERLAP_RATE))
 
