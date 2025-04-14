@@ -45,9 +45,9 @@ class FocalTverskyLoss(nn.Module):
 
         # ==========================================================================================================
         # https://github.com/Project-MONAI/MONAI/blob/46a5272196a6c2590ca2589029eed8e4d56ff008/monai/losses/tversky.py
-        tp = torch.sum(outputs * targets, dim=0)
-        fn = torch.sum((1 - outputs) * targets, dim=0)
-        fp = torch.sum(outputs * (1 - targets), dim=0)
+        tp = torch.sum(outputs * targets, dim=(0, 2, 3))
+        fn = torch.sum((1 - outputs) * targets, dim=(0, 2, 3))
+        fp = torch.sum(outputs * (1 - targets), dim=(0, 2, 3))
         # ==========================================================================================================
 
         ti = (tp + self.eps) / (tp + (config.model.FT_ALPHA * fn) + (config.model.FT_BETA * fp) + self.eps)
