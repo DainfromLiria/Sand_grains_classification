@@ -59,13 +59,13 @@ class Transformations:
     # preprocessing transformations
     USE_PREPROCESSING: bool = False
     IMAGE_TRANSFORMATIONS: A.Compose = A.Compose([
-        A.CLAHE(p=1.0),
-        A.Sharpen(p=1.0),
+        A.CLAHE(clip_limit=4.0, p=1.0),
+        A.Sharpen(alpha=(0.4, 0.4), lightness=(0.7, 0.7), p=1.0),
         A.Normalize(p=1.0), # default mean and std is for ImageNet
-        # A.Resize(512, 512),
     ])
-    MASK_TRANSFORMATION: A.Compose = A.Compose([
-        # A.Resize(512, 512),
+    USE_RESIZE: bool = False
+    RESIZE_TRANSFORMATION: A.Compose = A.Compose([
+        A.Resize(512, 512),
     ])
 
 @dataclass
@@ -91,7 +91,7 @@ class Model:
     ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit_b0 (or other b) for Segformer
     ENCODER_WEIGHTS: str = "imagenet" # for mit_b[1-5] available only imagenet, for other image-micronet
     BATCH_SIZE: int = 8 # 16, 8
-    LEARNING_RATE: float = 0.0001 # 0.0001, 0.00001
+    LEARNING_RATE: float = 0.00001 # 0.0001, 0.00001
     USE_CLIPPING: bool = False
 
     # Metrics and activation function
