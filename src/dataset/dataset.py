@@ -128,8 +128,8 @@ class SandGrainsDataset(Dataset):
         for ann in annotations:
             category_ids.append(ann['category_id'] - 1)
             mask = self._coco.annToMask(ann)
-            if config.transform.USE_PREPROCESSING:
-                mask: np.ndarray = config.transform.MASK_TRANSFORMATION(image=mask)["image"]
+            if config.transform.USE_RESIZE:
+                mask: np.ndarray = config.transform.RESIZE_TRANSFORMATION(image=mask)["image"]
             if config.model.USE_PATCHES:
                 mask = get_patch_by_position(img=mask, pos=self.positions[idx])
             masks.append(mask)
@@ -137,6 +137,8 @@ class SandGrainsDataset(Dataset):
         # apply image preprocessing transformations
         if config.transform.USE_PREPROCESSING:
             image: torch.Tensor = config.transform.IMAGE_TRANSFORMATIONS(image=image)["image"]
+        if config.transform.USE_RESIZE:
+            image: torch.Tensor = config.transform.RESIZE_TRANSFORMATION(image=image)["image"]
 
         # apply augmentations
         if self.mode == "train" and config.transform.USE_AUGMENTATIONS:
