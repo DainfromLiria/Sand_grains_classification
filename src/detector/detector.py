@@ -4,7 +4,10 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import cv2
+import matplotlib.pyplot as plt
 import neptune
+import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 import torch.utils.model_zoo as model_zoo
@@ -20,7 +23,8 @@ from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_confusion_matrix
 from metrics.loss import FocalLoss, FocalTverskyLoss
-from utils import visualize_nn_prediction, calculate_patch_positions, join_and_visualize_patches
+from utils import (calculate_patch_positions, join_and_visualize_patches,
+                   visualize_nn_prediction)
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +62,89 @@ class MicroTextureDetector:
                         T_mult=config.model.CA_TMULT,
                         eta_min=1e-8
                     )
-                self.loss_fn = nn.BCEWithLogitsLoss(weight=torch.tensor(0.25))
+                self.loss_fn = nn.BCEWithLogitsLoss()
                 # self.loss_fn = FocalLoss()
                 # self.loss_fn = FocalTverskyLoss()
-                self.results_folder_path = self._make_results_folder()
-                self._save_model_params()
+                if self.mode == "train":
+                    self.results_folder_path = self._make_results_folder()
+                    self._save_model_params()
+
+    def train(self) -> None:
+        """Train and validate model."""
+        best_loss = float("inf")
+        patience = config.model.PATIENCE
+        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
+            logger.info(f"EPOCH {epoch}")
+            train_loss = self._train_one_epoch()
+            val_loss, val_iou = self._validate_one_epoch()
+            logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
+
+            if val_loss is torch.nan or train_loss is torch.nan:
+                self.run.stop()
+                raise Exception("Loss is nan!!!")
+
+            # early stopping
+            if val_loss < best_loss:
+                self.run["best_val_iou"] = val_iou
+                self.run["best_val_loss"] = val_loss
+                best_loss = val_loss
+                patience = config.model.PATIENCE
+                model_path: Path = self.results_folder_path / "model.pt"
+                torch.save(self.model.state_dict(), model_path)
+                self.run["model/checkpoints"].upload(str(model_path))
+                logger.warning("Best model saved")
+            else:
+                patience -= 1
+                if patience <= 0:
+                    break
+        self.run.stop()
+
+    def validate(self) -> None:
+        """Validate model."""
+        val_loss, val_iou = self._validate_one_epoch()
+        logger.info(f"VALIDATION loss: {val_loss}")
+
+        if val_loss is torch.nan:
+            self.run.stop()
+            raise Exception("Loss is nan!!!")
+
+        self.run["best_val_iou"] = val_iou
+        self.run["best_val_loss"] = val_loss
+        self.run.stop()
+
+    def evaluate_test_data(self) -> None:
+        """Evaluate test dataset."""
+        self.model.eval()  # set model in evaluation mode.
+        confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
+
+        patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
+        patches_count: int = len(calculate_patch_positions())
+        print("Patches count:", patches_count)
+        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
+            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
+            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+            with torch.no_grad():
+                outputs = self.model(images)
+
+            outputs_for_viz = torch.sigmoid(outputs)
+            outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
+
+            # for i in range(config.model.BATCH_SIZE):
+            #     patches.append((images[i], masks[i], outputs_for_viz[i]))
+            #     if len(patches) == patches_count:
+            #         join_and_visualize_patches(patches)
+            #         patches = []
+
+
+            for i in range(config.model.BATCH_SIZE):
+                for j in range(config.data.CLASSES_COUNT):
+                    if j == 4:
+                        visualize_nn_prediction(images[i], masks[i][j], color=(0, 255, 0))
+                        visualize_nn_prediction(images[i], outputs_for_viz[i][j], color=(0, 0, 255))
+
+
+            confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
+        self._calculate_metrics(confusion_matrix, prefix="test/metric")
 
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
@@ -106,7 +188,7 @@ class MicroTextureDetector:
             model.load_state_dict(torch.load(model_path, weights_only=True, map_location=config.model.DEVICE))
             logger.info(f"Model weights loaded from {model_path}")
         elif self.mode in ("val", "eval", "infer") and self.experiment_uuid is None:
-            raise Exception("experiment_uuid is None. For 'eval' and 'infer' mode experiment_uuid must be provided.")
+            raise Exception("experiment_uuid is None. For 'val', 'eval' and 'infer' mode experiment_uuid must be provided.")
 
         model.to(config.model.DEVICE)
         return model
@@ -120,8 +202,7 @@ class MicroTextureDetector:
             logger.info(f"Train dataset size: {len(self.train_dataset)}")
             self.val_dataset = SandGrainsDataset(mode="val")
             logger.info(f"Val dataset size: {len(self.val_dataset)}")
-            shuffle: bool = False if config.model.USE_PATCHES else True
-            self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=shuffle)
+            self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=config.model.BATCH_SIZE, shuffle=True)
             self.val_loader = DataLoader(dataset=self.val_dataset, batch_size=config.model.BATCH_SIZE, shuffle=False)
         elif self.mode == "eval":
             self.test_dataset = SandGrainsDataset(mode="eval")
@@ -136,7 +217,6 @@ class MicroTextureDetector:
             project=os.getenv("NEPTUNE_PROJECT"),
             api_token=os.getenv("NEPTUNE_API_KEY"),
             name=self.experiment_uuid,
-            source_files=[]  # TODO add tracked files
         )
         npt_handler = NeptuneHandler(run=run)
         logger.addHandler(npt_handler)
@@ -178,42 +258,13 @@ class MicroTextureDetector:
             "ca_tmult": config.model.CA_TMULT,
             "classes_count": config.data.CLASSES_COUNT,
             "use_clipping": config.model.USE_CLIPPING,
-            # TODO add another params
+            "use_resize": config.transform.USE_RESIZE,
         }
         logger.info(f"MODEL PARAMETERS: {model_params}")
         self.run["params"] = model_params
         model_params_path: Path = self.results_folder_path / "model_params.json"
         with open(model_params_path, "w") as f:
             json.dump(model_params, f, indent=4)
-
-    def train(self) -> None:
-        """Train and validate model."""
-        best_loss = float("inf")
-        patience = config.model.PATIENCE
-        for epoch in tqdm(range(config.model.EPOCH_COUNT), desc="Train model"):
-            logger.info(f"EPOCH {epoch}")
-            train_loss = self._train_one_epoch()
-            val_loss, val_iou = self._validate_one_epoch()
-            logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
-
-            if val_loss is torch.nan or train_loss is torch.nan:
-                raise Exception("Loss is nan!!!")
-
-            # early stopping
-            if val_loss < best_loss:
-                self.run["best_val_iou"] = val_iou
-                self.run["best_val_loss"] = val_loss
-                best_loss = val_loss
-                patience = config.model.PATIENCE
-                model_path: Path = self.results_folder_path / "model.pt"
-                torch.save(self.model.state_dict(), model_path)
-                self.run["model/checkpoints"].upload(str(model_path))
-                logger.warning("Best model saved")
-            else:
-                patience -= 1
-                if patience <= 0:
-                    break
-        self.run.stop()
 
     def _train_one_epoch(self) -> float:
         """
@@ -231,9 +282,9 @@ class MicroTextureDetector:
             loss.backward()  # backward
 
             if config.model.USE_CLIPPING:
-                nn.utils.clip_grad_value_(self.model.parameters(), clip_value=1.0) # Gradient Value Clipping
+                nn.utils.clip_grad_value_(self.model.parameters(), clip_value=1.0) # gradient value clipping
 
-            self.optimizer.step()  # step of input optimizer
+            self.optimizer.step()  # optimizer make one step
 
             if config.model.USE_CA:
                 self.scheduler.step()  # step of cosine scheduler
@@ -245,18 +296,6 @@ class MicroTextureDetector:
         avg_train_loss = running_cum_loss / len(self.train_dataset)
         self.run["train/epoch/loss"].append(avg_train_loss)
         return avg_train_loss
-
-    def validate(self) -> None:
-        """Validate model."""
-        val_loss, val_iou = self._validate_one_epoch()
-        logger.info(f"VALIDATION loss: {val_loss}")
-
-        if val_loss is torch.nan:
-            raise Exception("Loss is nan!!!")
-
-        self.run["best_val_iou"] = val_iou
-        self.run["best_val_loss"] = val_loss
-        self.run.stop()
 
     def _validate_one_epoch(self) -> (float, torch.Tensor):
         """
@@ -279,36 +318,10 @@ class MicroTextureDetector:
         avg_val_loss: float = running_cum_loss / len(self.val_dataset)
         self.run["val/epoch/loss"].append(avg_val_loss)
         # calculate epoch metrics
-        iou = self.calculate_metrics(confusion_matrix, prefix="val/epoch/metric")
+        iou = self._calculate_metrics(confusion_matrix, prefix="val/epoch/metric")
         return avg_val_loss, iou
 
-    def evaluate_test_data(self) -> None:
-        """Evaluate test dataset. USE BATCH SIZE ONE!"""
-        self.model.eval()  # set model in evaluation mode.
-        confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
-
-        patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
-        patches_count: int = len(calculate_patch_positions())
-        print("Patches count:", patches_count)
-        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
-            images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
-            with torch.no_grad():
-                outputs = self.model(images)
-
-            # outputs_for_viz = torch.sigmoid(outputs)
-            # outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
-            # for i in range(config.model.BATCH_SIZE):
-            #     patches.append((images[i], masks[i], outputs_for_viz[i]))
-            #     if len(patches) == patches_count:
-            #         join_and_visualize_patches(patches)
-            #         patches = []
-
-
-            confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
-        self.calculate_metrics(confusion_matrix, prefix="test/metric")
-
-    def calculate_metrics(self, confusion_matrix: torch.Tensor, prefix: str) -> torch.Tensor:
+    def _calculate_metrics(self, confusion_matrix: torch.Tensor, prefix: str) -> torch.Tensor:
         """
         Calculate model evaluation metrics.
 
@@ -323,6 +336,7 @@ class MicroTextureDetector:
         precision_per_class = torch.squeeze((tp + eps) / (tp + fp + eps))
         recall_per_class = torch.squeeze((tp + eps) / (tp + fn + eps))
         iou_per_class = torch.squeeze((tp + eps) / (tp + fp + fn + eps))
+        print("iou_per_class:", iou_per_class)
         # avg
         avg_iou = torch.mean(iou_per_class)
         avg_recall = torch.mean(recall_per_class)
