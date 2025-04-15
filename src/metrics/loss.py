@@ -30,7 +30,7 @@ class FocalLoss(nn.Module):
         pt = torch.exp(-bce_loss)
 
         alpha = torch.tensor(config.model.F_ALPHA)
-        alpha = alpha * targets + (1 - alpha) * (1 - targets)
+        alpha = (1 - alpha) * targets + alpha * (1 - targets) # 0.75 for 1 and 0,25 for 0
 
         focal_loss = alpha * (torch.tensor(1) - pt)**config.model.F_GAMMA * bce_loss
         return torch.mean(focal_loss)
