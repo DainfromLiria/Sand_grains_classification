@@ -26,11 +26,14 @@ class FocalLoss(nn.Module):
         outputs = outputs.reshape(outputs.size(1), -1)
         targets = targets.reshape(targets.size(1), -1)
 
-        alpha = torch.tensor(config.model.F_ALPHA)
         bce_loss = F.binary_cross_entropy_with_logits(input=outputs, target=targets, reduction='none')  # -log(pt)
         pt = torch.exp(-bce_loss)
-        focal_loss_per_pixel = alpha * (torch.tensor(1) - pt)**config.model.F_GAMMA * bce_loss
-        return torch.mean(focal_loss_per_pixel)
+
+        alpha = torch.tensor(config.model.F_ALPHA)
+        alpha = alpha * targets + (1 - alpha) * (1 - targets)
+
+        focal_loss = alpha * (torch.tensor(1) - pt)**config.model.F_GAMMA * bce_loss
+        return torch.mean(focal_loss)
 # ====================================================================================================================
 
 
