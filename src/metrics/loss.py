@@ -16,9 +16,9 @@ class FocalLoss(nn.Module):
 
     def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
-        Calculate alpha weighted focal loss for all input batch. Use mean for reduction.
+        Calculate alpha weighted focal loss for per batch. Use mean for reduction.
 
-        :param outputs: output of last nn layer.
+        :param outputs: output of the last nn layer.
         :param targets: masks.
 
         :return: mean alpha weighted focal loss for batch.
@@ -41,9 +41,17 @@ class FocalLoss(nn.Module):
 class FocalTverskyLoss(nn.Module):
     def __init__(self):
         super(FocalTverskyLoss, self).__init__()
-        self.eps = 1e-6  # for situations when mask and target contains only zeros
+        self.eps = 1e-6  # for situations when mask and target contain only zeros
 
     def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate Focal Tversky loss for per batch. Use mean for reduction.
+
+        :param outputs: output of the last nn layer.
+        :param targets: masks.
+
+        :return: mean Focal Tversky loss for batch.
+        """
         outputs = torch.sigmoid(outputs)
 
         # ==========================================================================================================
