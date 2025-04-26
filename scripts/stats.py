@@ -6,34 +6,21 @@ import pandas as pd
 import seaborn as sns
 from pycocotools.coco import COCO
 
-
 # ENG to CZK dict
 cat_dict = {
     'adhering_particles': 'přilnavé částice',
     'precipitation': 'sraženiny',
     'edge_abrasion': 'abraze hran',
-    'crescentic_gouges': 'srpkovité rýhy',
     'pitting': 'tečkování',
-    'straight_steps': 'rovné stupně',
-    'subparallel_linear_fractures': 'lineární subparalelní lomy',
     'conchoidal_fracture': 'lasturnatý lom',
-    'fracture_faces': 'puklinové plochy',
-    'medium': 'střední reliéf',
-    'high': 'vysoký reliéf',
-    'low': 'nízký reliéf',
-    'arc_steps': 'obloukové stupně',
-    'rounded': 'zaoblený tvar',
-    'angular': 'ostrohranný tvar',
-    'crater': 'krátery',
-    'subangular': 'poloostrohranný tvar',
-    'subrounded': 'polozaoblený tvar',
-    'straight_grooves': 'rovné brázdy'
 }
 
 # Load COCO annotations
-ann_file = "../data/annotations/instances_default.json"
+# ann_file = "../data/train/annotations/instances_default.json"
+ann_file = "../data/eval/annotations/instances_default.json"
 coco = COCO(ann_file)
 print("|==============================================================|")
+print(f"Number of images: {len(coco.getImgIds())}")
 
 # Extract category names and their counts
 category_ids = coco.getCatIds()
@@ -74,4 +61,4 @@ ax.set_xlabel("Vlastnost", fontsize=25, labelpad=-30)
 
 sns.despine()
 plt.tight_layout()
-plt.show()
+plt.savefig("img/stats.png")
