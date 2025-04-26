@@ -1,0 +1,11 @@
+{
+    "classes": {
+        "pitting": 0,
+        "edge_abrasion": 1,
+        "precipitation": 2,
+        "adhering_particles": 3,
+        "conchoidal_fracture": 4
+    },
+    "num_classes": 5,
+    "img_count": 32
+}
