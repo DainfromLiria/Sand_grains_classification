@@ -7,3 +7,5 @@
 /.venv/
 .env
 /scripts/img/
+/src/.neptune/
+/.neptune/
