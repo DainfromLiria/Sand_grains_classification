@@ -6,3 +6,4 @@
 /predictions/
 /.venv/
 .env
+/scripts/img/
