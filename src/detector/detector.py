@@ -23,7 +23,7 @@ from tqdm import tqdm
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_confusion_matrix
-from metrics.loss import FocalLoss, FocalTverskyLoss
+from metrics import loss
 from utils import (calculate_patch_positions, join_and_visualize_patches,
                    visualize_nn_prediction)
 
@@ -44,7 +44,7 @@ class MicroTextureDetector:
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
         if self.mode in ("train", "val"):
             self.run = self._init_neptune()
-        if self.mode == "infer":
+        if self.mode in ("infer", "test"):
             self._read_config()
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
@@ -57,23 +57,25 @@ class MicroTextureDetector:
         if self.mode in ("train", "val", "eval"):
             self._load_data()
             if self.mode in ("train", "val"):
+                # Optimizer
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
 
                 # Scheduler
                 if config.model.USE_CA:
-                    # self.scheduler = CosineAnnealingWarmRestarts(
-                    #     optimizer=self.optimizer,
-                    #     T_0=config.model.CA_T0,
-                    #     T_mult=config.model.CA_TMULT,
-                    #     eta_min=1e-8
-                    # )
-                    self.scheduler = CosineAnnealingLR(self.optimizer, T_max=config.model.EPOCH_COUNT)
+                    if config.model.SCHEDULER == "CosineAnnealingLR":
+                        self.scheduler = CosineAnnealingLR(self.optimizer, T_max=config.model.CA_TMAX)
+                    else:
+                        self.scheduler = CosineAnnealingWarmRestarts(
+                            optimizer=self.optimizer,
+                            T_0=config.model.CA_T0,
+                            T_mult=config.model.CA_TMULT
+                        )
+                    logger.info(f"Scheduler: {self.scheduler.__class__.__name__}")
 
                 # Loss
-                # self.loss_fn = nn.BCEWithLogitsLoss()
-                # self.loss_fn = FocalLoss()
-                self.loss_fn = FocalTverskyLoss()
-
+                loss_pkg: object = nn if config.model.LOSS_FUNCTION == "BCEWithLogitsLoss" else loss
+                self.loss_fn = getattr(loss_pkg, config.model.LOSS_FUNCTION)()
+                logger.info(f"Loss function: {self.loss_fn.__class__.__name__}")
                 if self.mode == "train":
                     self.results_folder_path = self._make_results_folder()
                     self._save_model_params()
@@ -126,6 +128,7 @@ class MicroTextureDetector:
         self.run["best_val_loss"] = val_loss
         self.run.stop()
 
+    # TODO add TTA
     def evaluate_test_data(self, show_images: bool = False) -> None:
         """Evaluate test dataset."""
         self.model.eval()  # set model in evaluation mode.
@@ -160,7 +163,7 @@ class MicroTextureDetector:
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")
 
-    # TODO method for prediction on completely new data
+    # TODO method for prediction on completely new data that return bin mask
     def predict(self, img_name: str) -> None:
         """
         Generate prediction for image.
@@ -312,6 +315,7 @@ class MicroTextureDetector:
             "classes_count": config.data.CLASSES_COUNT,
             "use_clipping": config.model.USE_CLIPPING,
             "use_resize": config.transform.USE_RESIZE,
+            "scheduler": config.scheduler.__class__.__name__,
         }
         logger.info(f"MODEL PARAMETERS: {model_params}")
         self.run["params"] = model_params
@@ -400,3 +404,6 @@ class MicroTextureDetector:
                 self.run[f"{prefix}/{i}/recall"].append(recall_per_class[i])
                 self.run[f"{prefix}/{i}/precision"].append(precision_per_class[i])
         return avg_iou
+
+    def _apply_tta(self):
+        pass
