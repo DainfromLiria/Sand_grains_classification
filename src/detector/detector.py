@@ -44,6 +44,8 @@ class MicroTextureDetector:
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
         if self.mode in ("train", "val"):
             self.run = self._init_neptune()
+        if self.mode == "infer":
+            self._read_config()
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
         self.model = self._create_model(
@@ -56,6 +58,8 @@ class MicroTextureDetector:
             self._load_data()
             if self.mode in ("train", "val"):
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
+
+                # Scheduler
                 if config.model.USE_CA:
                     # self.scheduler = CosineAnnealingWarmRestarts(
                     #     optimizer=self.optimizer,
@@ -64,9 +68,12 @@ class MicroTextureDetector:
                     #     eta_min=1e-8
                     # )
                     self.scheduler = CosineAnnealingLR(self.optimizer, T_max=config.model.EPOCH_COUNT)
+
+                # Loss
                 # self.loss_fn = nn.BCEWithLogitsLoss()
                 # self.loss_fn = FocalLoss()
                 self.loss_fn = FocalTverskyLoss()
+
                 if self.mode == "train":
                     self.results_folder_path = self._make_results_folder()
                     self._save_model_params()
@@ -153,6 +160,30 @@ class MicroTextureDetector:
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")
 
+    # TODO method for prediction on completely new data
+    def predict(self, img_name: str) -> None:
+        """
+        Generate prediction for image.
+
+        :param img_name: name of image in PREDICTIONS_FOLDER (for example: A2.tif).
+        """
+        self.model.eval()
+        img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"File with name {img_name} does not found.")
+
+        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        image = config.data.IMAGE_PREDICTION_TRANSFORMATION(image=image)["image"]
+        image = image.float().to(config.model.DEVICE).unsqueeze(0)
+        img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
+        if not os.path.exists(img_predictions_folder_path):
+            os.mkdir(img_predictions_folder_path)
+
+        with torch.no_grad():
+            outputs = self.model(image)
+            outputs = torch.sigmoid(outputs)
+            outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
         Returns segmentation model with the specified encoder backbone.
@@ -216,6 +247,21 @@ class MicroTextureDetector:
             logger.info(f"Test dataset size: {len(self.test_dataset)}")
             self.test_loader = DataLoader(dataset=self.test_dataset, batch_size=config.model.BATCH_SIZE, shuffle=False)
         logger.info(f"Batch size: {config.model.BATCH_SIZE}")
+
+    def _read_config(self) -> None:
+        """Read the config file and set config values for the inference run of the existing model."""
+        if self.experiment_uuid is None:
+            raise Exception("experiment_uuid is None. For 'infer' mode experiment_uuid must be provided.")
+
+        config_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid / "model_params.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        # update only configs needed for inference
+        config.model.MODEL = data["model"]
+        config.model.ENCODER = data["encoder"]
+        config.model.ENCODER_WEIGHTS = data["encoder_weights"]
+        config.transform.USE_PREPROCESSING = data["use_preprocessing"]
+        logger.info("Config file was successfully loaded.")
 
     def _init_neptune(self) -> neptune.Run:
         """Initialize neptune Run."""
@@ -354,30 +400,3 @@ class MicroTextureDetector:
                 self.run[f"{prefix}/{i}/recall"].append(recall_per_class[i])
                 self.run[f"{prefix}/{i}/precision"].append(precision_per_class[i])
         return avg_iou
-
-    # TODO method for prediction on completely new data
-    # def predict(self, img_name: str) -> None:
-    #     """
-    #     Generate prediction for image.
-    #
-    #     :param img_name: name of image in PREDICTIONS_FOLDER (for example: A2.tif).
-    #     """
-    #     self.model.eval()
-    #     img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
-    #     if not os.path.exists(img_path):
-    #         raise FileNotFoundError(f"File with name {img_name} does not found.")
-    #
-    #     image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-    #     image = config.data.IMAGE_PREDICTION_TRANSFORMATION(image=image)["image"]
-    #     image = image.float().to(config.model.DEVICE).unsqueeze(0)
-    #     img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
-    #     if not os.path.exists(img_predictions_folder_path):
-    #         os.mkdir(img_predictions_folder_path)
-    #
-    #     with torch.no_grad():
-    #         outputs = self.model(image)
-    #         outputs = torch.sigmoid(outputs)
-    #         outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
-    #         outputs = predict_morphological_feature(outputs)
-    #     self.visualizer.make_prediction_visualisation(image, outputs[0].cpu().numpy(), img_predictions_folder_path)
-    #
