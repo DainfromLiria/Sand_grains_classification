@@ -15,7 +15,8 @@ from dotenv import load_dotenv
 from neptune.integrations.python_logger import NeptuneHandler
 from pretrained_microscopy_models.util import get_pretrained_microscopynet_url
 from torch import nn
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import (CosineAnnealingLR,
+                                      CosineAnnealingWarmRestarts)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -56,15 +57,16 @@ class MicroTextureDetector:
             if self.mode in ("train", "val"):
                 self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=config.model.LEARNING_RATE)
                 if config.model.USE_CA:
-                    self.scheduler = CosineAnnealingWarmRestarts(
-                        optimizer=self.optimizer,
-                        T_0=config.model.CA_T0,
-                        T_mult=config.model.CA_TMULT,
-                        eta_min=1e-8
-                    )
-                self.loss_fn = nn.BCEWithLogitsLoss()
+                    # self.scheduler = CosineAnnealingWarmRestarts(
+                    #     optimizer=self.optimizer,
+                    #     T_0=config.model.CA_T0,
+                    #     T_mult=config.model.CA_TMULT,
+                    #     eta_min=1e-8
+                    # )
+                    self.scheduler = CosineAnnealingLR(self.optimizer, T_max=config.model.EPOCH_COUNT)
+                # self.loss_fn = nn.BCEWithLogitsLoss()
                 # self.loss_fn = FocalLoss()
-                # self.loss_fn = FocalTverskyLoss()
+                self.loss_fn = FocalTverskyLoss()
                 if self.mode == "train":
                     self.results_folder_path = self._make_results_folder()
                     self._save_model_params()
@@ -78,6 +80,11 @@ class MicroTextureDetector:
             train_loss = self._train_one_epoch()
             val_loss, val_iou = self._validate_one_epoch()
             logger.info(f"TRAIN loss: {train_loss}   VALIDATION loss: {val_loss}")
+
+            if config.model.USE_CA:
+                self.scheduler.step()  # step of cosine scheduler
+                lr = self.scheduler.get_last_lr()[0]
+                self.run['train/epoch/lr'].append(lr)
 
             if val_loss is torch.nan or train_loss is torch.nan:
                 self.run.stop()
@@ -112,7 +119,7 @@ class MicroTextureDetector:
         self.run["best_val_loss"] = val_loss
         self.run.stop()
 
-    def evaluate_test_data(self) -> None:
+    def evaluate_test_data(self, show_images: bool = False) -> None:
         """Evaluate test dataset."""
         self.model.eval()  # set model in evaluation mode.
         confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
@@ -135,10 +142,10 @@ class MicroTextureDetector:
             #         join_and_visualize_patches(patches)
             #         patches = []
 
-
-            for i in range(config.model.BATCH_SIZE):
-                for j in range(config.data.CLASSES_COUNT):
-                    if j == 4:
+            if show_images:
+                for i in range(config.model.BATCH_SIZE):
+                    for j in range(config.data.CLASSES_COUNT):
+                        # if j == 4:
                         visualize_nn_prediction(images[i], masks[i][j], color=(0, 255, 0))
                         visualize_nn_prediction(images[i], outputs_for_viz[i][j], color=(0, 0, 255))
 
@@ -285,11 +292,6 @@ class MicroTextureDetector:
                 nn.utils.clip_grad_value_(self.model.parameters(), clip_value=1.0) # gradient value clipping
 
             self.optimizer.step()  # optimizer make one step
-
-            if config.model.USE_CA:
-                self.scheduler.step()  # step of cosine scheduler
-                lr = self.scheduler.get_last_lr()[0]
-                self.run['train/epoch/lr'].append(lr)
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
