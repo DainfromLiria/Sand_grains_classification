@@ -20,10 +20,10 @@ from torch.optim.lr_scheduler import (CosineAnnealingLR,
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+import metrics.loss as loss_functions
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_confusion_matrix
-from metrics import loss
 from utils import (calculate_patch_positions, join_and_visualize_patches,
                    visualize_nn_prediction)
 
@@ -44,7 +44,9 @@ class MicroTextureDetector:
         self.experiment_uuid: str = str(uuid4()) if self.mode == "train" else experiment_uuid
         if self.mode in ("train", "val"):
             self.run = self._init_neptune()
-        if self.mode in ("infer", "test"):
+            if config.transform.USE_TTA:
+                raise ValueError("TTA must be used only in infer or eval mode")
+        if self.mode in ("infer", "eval"):
             self._read_config()
         logger.warning(f"Model run in {mode} mode!")
         logger.info(f"Device: {config.model.DEVICE}")
@@ -73,7 +75,7 @@ class MicroTextureDetector:
                     logger.info(f"Scheduler: {self.scheduler.__class__.__name__}")
 
                 # Loss
-                loss_pkg: object = nn if config.model.LOSS_FUNCTION == "BCEWithLogitsLoss" else loss
+                loss_pkg: object = nn if config.model.LOSS_FUNCTION == "BCEWithLogitsLoss" else loss_functions
                 self.loss_fn = getattr(loss_pkg, config.model.LOSS_FUNCTION)()
                 logger.info(f"Loss function: {self.loss_fn.__class__.__name__}")
                 if self.mode == "train":
@@ -128,64 +130,58 @@ class MicroTextureDetector:
         self.run["best_val_loss"] = val_loss
         self.run.stop()
 
-    # TODO add TTA
-    def evaluate_test_data(self, show_images: bool = False) -> None:
-        """Evaluate test dataset."""
+    def evaluate_test_data(self, show_predictions: bool = False) -> None:
+        """
+        Evaluate test dataset.
+
+        :param show_predictions: Show model prediction and ground truth mask.
+        """
         self.model.eval()  # set model in evaluation mode.
         confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
-
-        patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
-        patches_count: int = len(calculate_patch_positions())
-        print("Patches count:", patches_count)
         for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
-            # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
-            with torch.no_grad():
-                outputs = self.model(images)
+            if config.transform.USE_TTA:
+                outputs = self._apply_tta(images)
+            else:
+                # disables gradient calculation because we don't call backward prop. It reduces memory consumption.
+                with torch.no_grad():
+                    outputs = self.model(images)
 
-            outputs_for_viz = torch.sigmoid(outputs)
-            outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
-
-            # for i in range(config.model.BATCH_SIZE):
-            #     patches.append((images[i], masks[i], outputs_for_viz[i]))
-            #     if len(patches) == patches_count:
-            #         join_and_visualize_patches(patches)
-            #         patches = []
-
-            if show_images:
+            if show_predictions:
+                outputs_for_viz = torch.sigmoid(outputs)
+                outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
                 for i in range(config.model.BATCH_SIZE):
                     for j in range(config.data.CLASSES_COUNT):
-                        # if j == 4:
-                        visualize_nn_prediction(images[i], masks[i][j], color=(0, 255, 0))
-                        visualize_nn_prediction(images[i], outputs_for_viz[i][j], color=(0, 0, 255))
-
+                        visualize_nn_prediction(f"{i}_{j}", images[i], masks[i][j], color=(0, 255, 0))
+                        visualize_nn_prediction(f"{i}_{j}", images[i], outputs_for_viz[i][j], color=(0, 0, 255))
 
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")
 
-    # TODO method for prediction on completely new data that return bin mask
     def predict(self, img_name: str) -> None:
         """
         Generate prediction for image.
 
-        :param img_name: name of image in PREDICTIONS_FOLDER (for example: A2.tif).
+        :param img_name: name of the image in PREDICTIONS_FOLDER (for example: A2.tif).
         """
         self.model.eval()
-        img_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name)
-        if not os.path.exists(img_path):
+        img_path = config.paths.PREDICTIONS_FOLDER / img_name
+        if not img_path.exists():
             raise FileNotFoundError(f"File with name {img_name} does not found.")
 
-        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        image = config.data.IMAGE_PREDICTION_TRANSFORMATION(image=image)["image"]
-        image = image.float().to(config.model.DEVICE).unsqueeze(0)
-        img_predictions_folder_path = os.path.join(config.data.PREDICTIONS_FOLDER_PATH, img_name.split('.')[0])
-        if not os.path.exists(img_predictions_folder_path):
-            os.mkdir(img_predictions_folder_path)
+        image: np.ndarray = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+        image: torch.Tensor = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0)
 
-        with torch.no_grad():
-            outputs = self.model(image)
-            outputs = torch.sigmoid(outputs)
-            outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+        if config.transform.TTA_AUGMENTATIONS:
+            outputs = self._apply_tta(image)
+        else:
+            with torch.no_grad():
+                outputs = self.model(image)
+                outputs = torch.sigmoid(outputs)
+                outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+
+        for j in range(config.data.CLASSES_COUNT):
+            visualize_nn_prediction(f"0_{j}", image[0], outputs[0][j], color=(0, 0, 255))
 
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
@@ -286,12 +282,12 @@ class MicroTextureDetector:
         """
         # assemble name
         results_folder_path: Path = config.paths.RESULTS_FOLDER / self.experiment_uuid
-        results_folder_path.mkdir(parents=False, exist_ok=False)
+        results_folder_path.mkdir(parents=False, exist_ok=False) # raise exception if the folder with this uuid exists
         logger.info(f"Results will be save into: {results_folder_path}")
         return results_folder_path
 
     def _save_model_params(self) -> None:
-        """Save main model parameters into json file and send params into neptune."""
+        """Save main model parameters into JSON file and send params into neptune."""
         model_params: dict = {
             "mode": self.mode,
             "model": config.model.MODEL,
@@ -315,7 +311,7 @@ class MicroTextureDetector:
             "classes_count": config.data.CLASSES_COUNT,
             "use_clipping": config.model.USE_CLIPPING,
             "use_resize": config.transform.USE_RESIZE,
-            "scheduler": config.scheduler.__class__.__name__,
+            "scheduler": config.model.SCHEDULER,
         }
         logger.info(f"MODEL PARAMETERS: {model_params}")
         self.run["params"] = model_params
@@ -341,7 +337,7 @@ class MicroTextureDetector:
             if config.model.USE_CLIPPING:
                 nn.utils.clip_grad_value_(self.model.parameters(), clip_value=1.0) # gradient value clipping
 
-            self.optimizer.step()  # optimizer make one step
+            self.optimizer.step()  # optimizer makes one step
 
             # mul on batch size because loss is avg loss for batch, so loss=loss/batch_size
             running_cum_loss += loss.item() * images.shape[0]
@@ -353,7 +349,7 @@ class MicroTextureDetector:
         """
         Calculate loss and metrics on validation dataset.
 
-        :return: average validation loss per epoch.
+        :return: average validation loss and IoU per epoch.
         """
         self.model.eval()  # set model in evaluation mode.
         running_cum_loss = 0.0
@@ -375,7 +371,7 @@ class MicroTextureDetector:
 
     def _calculate_metrics(self, confusion_matrix: torch.Tensor, prefix: str) -> torch.Tensor:
         """
-        Calculate model evaluation metrics.
+        Calculate model evaluation metrics (IoU, recall, precision).
 
         :param confusion_matrix: per class TP, FP and FN in format [3, classes_count]
         :param prefix: metric prefix for neptune.
@@ -386,9 +382,11 @@ class MicroTextureDetector:
         tp, fp, fn = confusion_matrix[0], confusion_matrix[1], confusion_matrix[2]
         # per class
         precision_per_class = torch.squeeze((tp + eps) / (tp + fp + eps))
+        logger.info(f"precision_per_class: {precision_per_class}")
         recall_per_class = torch.squeeze((tp + eps) / (tp + fn + eps))
+        logger.info(f"recall_per_class: {recall_per_class}")
         iou_per_class = torch.squeeze((tp + eps) / (tp + fp + fn + eps))
-        print("iou_per_class:", iou_per_class)
+        logger.info(f"iou_per_class: {iou_per_class}")
         # avg
         avg_iou = torch.mean(iou_per_class)
         avg_recall = torch.mean(recall_per_class)
@@ -405,5 +403,26 @@ class MicroTextureDetector:
                 self.run[f"{prefix}/{i}/precision"].append(precision_per_class[i])
         return avg_iou
 
-    def _apply_tta(self):
-        pass
+    def _apply_tta(self, image: torch.Tensor) -> torch.Tensor:
+        """
+        Apply TTA augmentations on input image or batch of images and return binary prediction mask.
+        For now, only vertical and horizontal flips are supported.
+
+        :return: binary prediction mask.
+        """
+        tta_output: torch.Tensor = torch.zeros(image.shape[0], config.data.CLASSES_COUNT, image.shape[2], image.shape[3])
+        tta_transforms: list = config.transform.TTA_AUGMENTATIONS
+        for i in range(len(config.transform.TTA_AUGMENTATIONS)):
+            # augmentation
+            aug_img: torch.Tensor = torch.flip(image, dims=tta_transforms[i]) if tta_transforms[i] else image
+           # predict
+            with torch.no_grad():
+                outputs = self.model(aug_img)
+                outputs = torch.sigmoid(outputs)
+            # deaugmentation
+            outputs = torch.flip(outputs, dims=tta_transforms[i]) if tta_transforms[i] else outputs
+            tta_output += outputs
+        # final averaged prediction
+        tta_output /= len(tta_transforms)
+        tta_output = (tta_output > config.model.THRESHOLD).type(torch.uint8)
+        return tta_output
