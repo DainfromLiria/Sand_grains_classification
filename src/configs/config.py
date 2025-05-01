@@ -43,16 +43,13 @@ class Transformations:
         A.VerticalFlip(p=0.5),
         A.Rotate(limit=(-45, 45), p=0.5, border_mode=cv2.BORDER_REFLECT), # mirror reflection of the border elements
         A.RandomBrightnessContrast(p=0.5),
-        A.GaussNoise(std_range=(0.1, 0.2), mean_range=(0.0, 0.0), p=0.5),
-        A.ElasticTransform(alpha=80, sigma=50, p=0.5),
+        A.GaussNoise(std_range=(0.1, 0.2), mean_range=(0.0, 0.0), p=0.2),
+        A.ElasticTransform(alpha=80, sigma=50, p=0.3),
     ])
 
-    # test time augmentations
+    # test time augmentations (only flips in order neither, vertical, horizontal)
     USE_TTA: bool = False
-    TTA_AUGMENTATIONS: list = field(default_factory=lambda: [
-        A.HorizontalFlip(p=1.0),
-        A.VerticalFlip(p=1.0),
-    ])
+    TTA_AUGMENTATIONS: list = field(default_factory=lambda:[None, [2], [3]])
 
     # preprocessing transformations
     USE_PREPROCESSING: bool = False
@@ -72,8 +69,14 @@ class DataConfig:
     # image properties
     IMAGE_WIDTH: int = 1280
     IMAGE_HEIGHT: int = 960
-    MAX_PIXEL_VALUE: int = 255
-    CLASSES_COUNT: int = 5 # 5 - mechanical(3) and chemical(2); 7 - relief(3) and shape(4)
+    CLASSES_COUNT: int = 5 # 5 - mechanical(3) and chemical(2)
+    CLASSES_NAMES: dict[int, str] = field(default_factory=lambda: {
+        0: "pitting",
+        1: "edge_abrasion",
+        2: "precipitation",
+        3: "adhering_particles",
+        4: "conchoidal_fracture"
+    })
 
     # train validation split
     TRAIN_SIZE: float = 0.8
@@ -83,10 +86,10 @@ class DataConfig:
 @dataclass
 class Model:
     # Main
-    DEVICE: str = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    DEVICE: str = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     AVAILABLE_MODELS: list = field(default_factory=lambda:['Unet', 'DeepLabV3Plus', 'Segformer'])
-    MODEL: str = 'Segformer'
-    ENCODER: str = 'mit_b0' # resnet50 for U-Net and DeepLabV3Plus, mit_b0 (or other b) for Segformer
+    MODEL: str = 'DeepLabV3Plus'
+    ENCODER: str = 'resnet50' # resnet50 for U-Net and DeepLabV3Plus, mit_b0 (or other b) for Segformer
     ENCODER_WEIGHTS: str = "imagenet" # for mit_b[1-5] available only imagenet, for other image-micronet
     BATCH_SIZE: int = 8 # 16, 8
     LEARNING_RATE: float = 0.0001 # 0.0001, 0.00001
@@ -112,14 +115,14 @@ class Model:
     PATIENCE: int = 100 # early stopping
 
     # Scheduler (Cosine Annealing and Cosine Annealing with Warm Restarts)
+    USE_CA: bool = False
     SCHEDULER: str = "CosineAnnealingLR" # CosineAnnealingWarmRestarts
-    USE_CA: bool = True
     CA_T0: int = 10
     CA_TMULT: int = 2
     CA_TMAX: int = EPOCH_COUNT
 
     # Overlapping patches
-    USE_PATCHES: bool = True
+    USE_PATCHES: bool = False
     PATCH_SIZE: int = 512 # imagenet pretrained encoder's input size. But try 512?
     OVERLAP_RATE: float = 0.5 # half of PATCH_SIZE # try 0.6 or 0.7
     PATCH_STRIDE: int = int(PATCH_SIZE * (1 - OVERLAP_RATE))
