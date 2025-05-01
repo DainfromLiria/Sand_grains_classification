@@ -171,12 +171,12 @@ class MicroTextureDetector:
             raise FileNotFoundError(f"File with name {img_name} does not found.")
 
         image: np.ndarray = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
-        image: torch.Tensor = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0)
+        image: torch.Tensor = torch.from_numpy(image.transpose(2, 0, 1)).float().unsqueeze(0)
 
         start_inference = time.time()
         prediction = self._apply_tta(image)
         logger.info("Inference in {:.2f}s".format(time.time() - start_inference))
-        return image.squeeze().numpy(), prediction.squeeze().numpy()
+        return image.squeeze().permute(1, 2, 0).numpy(), prediction.squeeze().numpy()
 
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
