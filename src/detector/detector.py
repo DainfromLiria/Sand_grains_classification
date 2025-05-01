@@ -1,11 +1,11 @@
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from uuid import uuid4
 
 import cv2
-import matplotlib.pyplot as plt
 import neptune
 import numpy as np
 import segmentation_models_pytorch as smp
@@ -24,8 +24,7 @@ import metrics.loss as loss_functions
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_confusion_matrix
-from utils import (calculate_patch_positions, join_and_visualize_patches,
-                   visualize_nn_prediction)
+from utils import visualize_nn_prediction
 
 logger = logging.getLogger(__name__)
 
@@ -158,11 +157,13 @@ class MicroTextureDetector:
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")
 
-    def predict(self, img_name: str) -> None:
+    def predict(self, img_name: str) -> tuple[np.ndarray, np.ndarray]:
         """
         Generate prediction for image.
 
         :param img_name: name of the image in PREDICTIONS_FOLDER (for example: A2.tif).
+
+        :return: image and binary prediction mask as numpy arrays.
         """
         self.model.eval()
         img_path = config.paths.PREDICTIONS_FOLDER / img_name
@@ -172,16 +173,10 @@ class MicroTextureDetector:
         image: np.ndarray = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
         image: torch.Tensor = torch.from_numpy(image).float().permute(2, 0, 1).unsqueeze(0)
 
-        if config.transform.TTA_AUGMENTATIONS:
-            outputs = self._apply_tta(image)
-        else:
-            with torch.no_grad():
-                outputs = self.model(image)
-                outputs = torch.sigmoid(outputs)
-                outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
-
-        for j in range(config.data.CLASSES_COUNT):
-            visualize_nn_prediction(f"0_{j}", image[0], outputs[0][j], color=(0, 0, 255))
+        start_inference = time.time()
+        prediction = self._apply_tta(image)
+        logger.info("Inference in {:.2f}s".format(time.time() - start_inference))
+        return image.squeeze().numpy(), prediction.squeeze().numpy()
 
     def _create_model(self, model_name: str, encoder: str, encoder_weights: str) -> nn.Module:
         """
