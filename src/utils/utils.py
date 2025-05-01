@@ -1,5 +1,4 @@
 import logging
-import uuid
 
 import cv2
 import matplotlib.pyplot as plt
@@ -64,7 +63,16 @@ def denormalize(image: torch.Tensor) -> torch.Tensor:
     return (image * std) + mean
 
 
-def join_and_visualize_patches(patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]) -> None:
+def join_patches(
+        patches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Join image, mask and nn prediction patches.
+
+    :param patches: tuple with patches in order (image, mask, prediction).
+
+    :return: tuple with joined patches in order (image, mask, prediction).
+    """
     pad_h, pad_w = get_padding_height_and_width()
     h, w = config.data.IMAGE_HEIGHT+pad_h, config.data.IMAGE_WIDTH+pad_w
     image: torch.Tensor = torch.zeros(3, h, w)
@@ -77,30 +85,44 @@ def join_and_visualize_patches(patches: list[tuple[torch.Tensor, torch.Tensor, t
             image[:, y:y + config.model.PATCH_SIZE, x:x + config.model.PATCH_SIZE] += patches[idx][0]
             mask[:, y:y + config.model.PATCH_SIZE, x:x + config.model.PATCH_SIZE] += patches[idx][1]
             prediction[:, y:y + config.model.PATCH_SIZE, x:x + config.model.PATCH_SIZE] += patches[idx][2]
-
             idx += 1
-
-    for i in range(config.data.CLASSES_COUNT):
-        if i == 4:
-            visualize_nn_prediction(image, mask[i], color=(0, 255, 0))
-            visualize_nn_prediction(image, prediction[i], color=(0, 0, 255))
+    return image, mask, prediction
 
 
-def visualize_nn_prediction(image: torch.Tensor, mask: torch.Tensor, color = (0, 255, 0)):
+def visualize_nn_prediction(name: str, image: torch.Tensor, mask: torch.Tensor, color: tuple = (0, 255, 0)):
     """color: str - can be "red" or "green" or add support of all colors."""
     denorm_img = denormalize(image) if config.transform.USE_PREPROCESSING else image
     image_rgb = denorm_img.permute(1, 2, 0).numpy()
     image_rgb = image_rgb if config.transform.USE_PREPROCESSING else image_rgb
     mask_np = mask.numpy()
     if len(np.unique(mask_np)) > 1:
-        mask_rgb = np.zeros_like(image_rgb)
-        mask_rgb[mask_np >= 1] = color
-        # alpha blending
-        alpha = 0.5
-        overlay = (1 - alpha) * image_rgb + alpha * mask_rgb
-        overlay = overlay[0:config.data.IMAGE_HEIGHT, 0:config.data.IMAGE_WIDTH, :]
+        overlay = apply_mask(image_rgb, mask_np, color)
         # show image
-        # cv2.imshow("image", overlay)
-        # cv2.waitKey(2555904)
-        # cv2.destroyAllWindows()
-        cv2.imwrite(f"/home/anopaden/Study_AI/BI-BAP/Sand_grains_classification/predictions/{uuid.uuid4()}.png", overlay)
+        cv2.imshow(name, overlay / 255)
+        cv2.waitKey(2555904)
+        cv2.destroyAllWindows()
+        # cv2.imwrite(f"/home/anopaden/Study_AI/BI-BAP/Sand_grains_classification/predictions/{uuid.uuid4()}.png", overlay)
+
+def visualize_prediction(img: np.ndarray, pred: np.ndarray, color: tuple = (0, 255, 0)) -> None:
+    """
+    Visualize prediction on the image using input color (by default green).
+    The Main use case is visualizations in Jupiter Notebook.
+    """
+    names: dict[int, str] = config.data.CLASSES_NAMES
+    masks: dict[str, np.ndarray] = {names[i]: mask for i, mask in enumerate(pred) if len(np.unique(mask)) > 1}
+    fig, axes = plt.subplots(len(masks.keys()), 1, figsize=(30, 50))
+    for i, (name, mask) in enumerate(masks.items()):
+        overlay = apply_mask(img, mask, color)
+        axes[i].imshow(np.clip(overlay, 0, 255).astype(np.uint8))
+        axes[i].axis('off')
+        axes[i].set_title(name)
+    plt.tight_layout()
+    plt.show()
+
+def apply_mask(image: np.ndarray, mask: np.ndarray, color: tuple = (0, 255, 0)) -> np.ndarray:
+    """Overlay mask on the image using user defines color (by default green)."""
+    mask_rgb = np.zeros_like(image)
+    mask_rgb[mask >= 1] = color
+    # alpha blending
+    alpha = 0.5
+    return image + alpha * mask_rgb
