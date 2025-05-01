@@ -151,8 +151,8 @@ class MicroTextureDetector:
                 outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
                 for i in range(config.model.BATCH_SIZE):
                     for j in range(config.data.CLASSES_COUNT):
-                        visualize_nn_prediction(f"{i}_{j}", images[i], masks[i][j], color=(0, 255, 0))
-                        visualize_nn_prediction(f"{i}_{j}", images[i], outputs_for_viz[i][j], color=(0, 0, 255))
+                        visualize_nn_prediction(f"{i}_{j}_ground_truth", images[i], masks[i][j], color=(0, 255, 0))
+                        visualize_nn_prediction(f"{i}_{j}_prediction", images[i], outputs_for_viz[i][j], color=(0, 0, 255))
 
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")
