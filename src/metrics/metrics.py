@@ -16,9 +16,10 @@ def calculate_confusion_matrix(outputs: torch.Tensor, targets: torch.Tensor) -> 
 
     :return: confusion matrix in Tensor format with values in order tp, fp, fn. All values are torch.Tensor.
     """
-    # convert probabilities into labels
-    outputs = torch.sigmoid(outputs)
-    outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
+    # convert probabilities into labels (only TTA returns binary mask)
+    if not config.transform.USE_TTA:
+        outputs = torch.sigmoid(outputs)
+        outputs = (outputs > config.model.THRESHOLD).type(torch.uint8)
 
     # calculate TP
     tp_mat = torch.logical_and(outputs, targets)
