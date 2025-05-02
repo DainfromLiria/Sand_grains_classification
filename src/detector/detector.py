@@ -24,7 +24,7 @@ import metrics.loss as loss_functions
 from configs import config
 from dataset import SandGrainsDataset
 from metrics import calculate_confusion_matrix
-from utils import visualize_nn_prediction
+from utils import visualize_binary_mask
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +137,7 @@ class MicroTextureDetector:
         """
         self.model.eval()  # set model in evaluation mode.
         confusion_matrix: torch.Tensor = torch.zeros((config.model.CONF_MAT_SIZE, config.data.CLASSES_COUNT))
-        for images, masks in tqdm(self.test_loader, desc="Evaluate test data"):
+        for batch_num, (images, masks) in tqdm(enumerate(self.test_loader), desc="Evaluate test data"):
             images, masks = images.float().to(config.model.DEVICE), masks.float().to(config.model.DEVICE)
             if config.transform.USE_TTA:
                 outputs = self._apply_tta(images)
@@ -151,8 +151,18 @@ class MicroTextureDetector:
                 outputs_for_viz = (outputs_for_viz > config.model.THRESHOLD).type(torch.uint8)
                 for i in range(config.model.BATCH_SIZE):
                     for j in range(config.data.CLASSES_COUNT):
-                        visualize_nn_prediction(f"{i}_{j}_ground_truth", images[i], masks[i][j], color=(0, 255, 0))
-                        visualize_nn_prediction(f"{i}_{j}_prediction", images[i], outputs_for_viz[i][j], color=(0, 0, 255))
+                        visualize_binary_mask(
+                            name=f"{batch_num}_{i}_{j}_ground_truth",
+                            image=images[i],
+                            mask=masks[i][j],
+                            color=(0, 255, 0),
+                        )
+                        visualize_binary_mask(
+                            name=f"{batch_num}_{i}_{j}_prediction",
+                            image=images[i],
+                            mask=outputs_for_viz[i][j],
+                            color=(0, 0, 255),
+                        )
 
             confusion_matrix += calculate_confusion_matrix(outputs, masks).to("cpu")
         self._calculate_metrics(confusion_matrix, prefix="test/metric")

@@ -89,8 +89,20 @@ def join_patches(
     return image, mask, prediction
 
 
-def visualize_nn_prediction(name: str, image: torch.Tensor, mask: torch.Tensor, color: tuple = (0, 255, 0)):
-    """color: str - can be "red" or "green" or add support of all colors."""
+def visualize_binary_mask(
+        name: str,
+        image: torch.Tensor,
+        mask: torch.Tensor,
+        color: tuple = (0, 255, 0)
+) -> None:
+    """
+    Visualize one binary mask (ground truth or nn prediction) on input image and show it.
+
+    :param name: name of the opencv window.
+    :param image: input image.
+    :param mask: binary mask.
+    :param color: color in RGB format.
+    """
     denorm_img = denormalize(image) if config.transform.USE_PREPROCESSING else image
     image_rgb = denorm_img.permute(1, 2, 0).numpy()
     image_rgb = image_rgb if config.transform.USE_PREPROCESSING else image_rgb
@@ -101,7 +113,6 @@ def visualize_nn_prediction(name: str, image: torch.Tensor, mask: torch.Tensor, 
         cv2.imshow(name, overlay / 255)
         cv2.waitKey(2555904)
         cv2.destroyAllWindows()
-        # cv2.imwrite(f"/home/anopaden/Study_AI/BI-BAP/Sand_grains_classification/predictions/{uuid.uuid4()}.png", overlay)
 
 def visualize_prediction(img: np.ndarray, pred: np.ndarray, color: tuple = (0, 255, 0)) -> None:
     """
