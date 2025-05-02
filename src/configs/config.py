@@ -12,8 +12,8 @@ class Paths:
     ROOT: Path = Path(__file__).resolve().parent.parent.parent
     DATA: Path = ROOT / "data"
 
-    PREDICTIONS_FOLDER: Path = ROOT / "predictions"
-    PREDICTIONS_FOLDER.mkdir(parents=False, exist_ok=True)
+    INPUT_IMAGES_FOLDER: Path = ROOT / "input_images"
+    INPUT_IMAGES_FOLDER.mkdir(parents=False, exist_ok=True)
     RESULTS_FOLDER: Path = ROOT / "results"
     RESULTS_FOLDER.mkdir(parents=False, exist_ok=True)
     MODELS_FOLDER: Path = ROOT / "models"
@@ -48,7 +48,7 @@ class Transformations:
     ])
 
     # test time augmentations (only flips in order neither, vertical, horizontal)
-    USE_TTA: bool = False
+    USE_TTA: bool = True
     TTA_AUGMENTATIONS: list = field(default_factory=lambda:[None, [2], [3]])
 
     # preprocessing transformations

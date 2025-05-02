@@ -171,12 +171,12 @@ class MicroTextureDetector:
         """
         Generate prediction for image.
 
-        :param img_name: name of the image in PREDICTIONS_FOLDER (for example: A2.tif).
+        :param img_name: name of the image in INPUT_IMAGES_FOLDER (for example: A2.tif).
 
         :return: image and binary prediction mask as numpy arrays.
         """
         self.model.eval()
-        img_path = config.paths.PREDICTIONS_FOLDER / img_name
+        img_path = config.paths.INPUT_IMAGES_FOLDER / img_name
         if not img_path.exists():
             raise FileNotFoundError(f"File with name {img_name} does not found.")
 
