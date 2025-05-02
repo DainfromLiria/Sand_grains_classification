@@ -2,8 +2,6 @@
 /.idea/
 /.sand_grains/
 /models/
-/results/
-/predictions/
 /.venv/
 .env
 /scripts/img/
