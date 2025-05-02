@@ -1,18 +1,12 @@
-import torch
-
-from configs import config
-# from dataset import SandGrainsDataset
 from detector import MicroTextureDetector
-from utils.logging import setup_logging
-
-# from torch.utils.data import DataLoader
+from setup import setup
 
 if __name__ == '__main__':
-    setup_logging()
-    torch.hub.set_dir(config.paths.MODELS_FOLDER)  # TODO move to some setup file
+    setup()
 
-    # dataset = SandGrainsDataset(mode="val")
-    # img = dataset[0]
-    #
     det = MicroTextureDetector(mode="train")
     det.train()
+
+    # example of evaluation
+    # det = MicroTextureDetector(mode="eval", experiment_uuid="03adda57-e689-4a1b-b1aa-84692602e12f")
+    # det.evaluate_test_data(show_predictions=True)
