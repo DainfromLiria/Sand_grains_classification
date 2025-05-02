@@ -179,6 +179,8 @@ class MicroTextureDetector:
         img_path = config.paths.INPUT_IMAGES_FOLDER / img_name
         if not img_path.exists():
             raise FileNotFoundError(f"File with name {img_name} does not found.")
+        if not config.transform.USE_TTA:
+            raise ValueError("USE_TTA is False but model was run in infer mode. Please allow it in config file.")
 
         image: np.ndarray = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
         image: torch.Tensor = torch.from_numpy(image.transpose(2, 0, 1)).float().unsqueeze(0)
