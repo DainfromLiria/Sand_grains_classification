@@ -20,7 +20,8 @@ microtextures with next IoU on test set:
 
 ## How to run
 
-The simplest way to run this tool is Google Colab TODO LINK.
+The simplest way to run this tool is 
+[Google Colab Notebook](https://colab.research.google.com/drive/103_3fYQNe1pZCEI4YAvu_Tfl3qMEmoFu?usp=sharing).
 
 If you want to run this project locally, make the next steps:
 
