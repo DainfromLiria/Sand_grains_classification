@@ -29,7 +29,7 @@ If you want to run this project locally, make the next steps:
 git clone https://github.com/DainfromLiria/Sand_grains_classification.git
 ```
 
-2. In the project folder run `setup.sh` script (run `chmod +x setup.sh` if a script doesn't have execute permission)
+2. In the project folder run `setup.sh` script (firstly run `chmod +x setup.sh` if a script doesn't have execute permission)
 ```bash
 source setup.sh
 ```
