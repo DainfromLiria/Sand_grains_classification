@@ -7,3 +7,4 @@
 /scripts/img/
 /src/.neptune/
 /.neptune/
+/results/**/*.pt
