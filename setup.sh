@@ -12,3 +12,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip install --no-dependencies git+https://github.com/nasa/pretrained-microscopy-models
+
+# shellcheck disable=SC2164
+cd scripts
+python3 merge_split_pt.py merge
+echo "model.pt was successfully created"
+# shellcheck disable=SC2103
+cd ..
