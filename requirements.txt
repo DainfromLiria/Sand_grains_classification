@@ -1,13 +1,12 @@
-albumentations>=2.0.5
 opencv-python>=4.11.0.86
+matplotlib>=3.10.0
 numpy>=2.2.3
+torch>=2.6.0+cu118
+albumentations>=2.0.6
 pycocotools>=2.0.8
 neptune>=1.13.0
 segmentation_models_pytorch>=0.4.0
 python-dotenv>=1.0.1
 tqdm>=4.67.1
-seaborn>=0.13.2
-matplotlib>=3.10.0
 pandas>=2.2.3
-torch>=2.6.0
-git+https://github.com/nasa/pretrained-microscopy-models
+seaborn>=0.13.2
