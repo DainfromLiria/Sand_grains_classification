@@ -44,7 +44,7 @@ jupyter notebook showcase.ipynb
 
 If you want to run model in train or validation mode, add `.env`
 file into the project directory. `.env` must contain 
-Neptune project name and API key in format:
+[Neptune](https://neptune.ai) project name and API key in format:
 ```
 NEPTUNE_PROJECT=<project_name>
 NEPTUNE_API_KEY=<api_key>
