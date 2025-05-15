@@ -16,3 +16,7 @@ Prohlašuji, že jsem předloženou práci vypracoval samostatně a že jsem uve
 Beru na vědomí, že se na moji práci vztahují práva a povinnosti vyplývající ze zákona č.~121/2000 Sb., autorského zákona, ve znění pozdějších předpisů, zejména
 skutečnost, že České vysoké učení technické v Praze má právo na uzavření licenční
 smlouvy o užití této práce jako školního díla podle § 60 odst. 1 citovaného zákona.
+
+Prohlašuji, že jsem v průběhu příprav a psaní závěrečné práce použil nástroje umělé
+inteligence. Vygenerovaný obsah jsem ověřil. Stvrzuji, že jsem si vědom, že za obsah
+závěrečné práce plně zodpovídám.
