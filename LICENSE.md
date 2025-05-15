@@ -9,7 +9,7 @@ Tato práce vznikla jako školní dílo na Českém vysokém učení technickém
 užití, s výjimkou bezúplatných zákonných licencí a nad rámec oprávnění uvedených
 v Prohlášení, je nezbytný souhlas autora.
 
-## Prohlášení
+### Prohlášení
 
 Prohlašuji, že jsem předloženou práci vypracoval samostatně a že jsem uvedl veškeré použité informační zdroje v souladu s Metodickým pokynem o dodržování etických principů při přípravě vysokoškolských závěrečných prací.
 
